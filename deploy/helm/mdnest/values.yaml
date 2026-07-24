@@ -126,10 +126,12 @@ frontend:
     port: 80
   # WebSocket proxy read/send timeout (seconds) — must stay long for live collab.
   wsTimeoutSeconds: 86400
-  # nginx worker_processes. Empty keeps the image default (`auto` = one worker
-  # per host CPU), which spawns hundreds of workers on large nodes and OOM-kills
-  # the container. Set a small integer for this static file server.
-  workerProcesses: ""
+  # Extra environment variables for the nginx container. The image default
+  # `worker_processes auto` starts one worker per host CPU (hundreds on large
+  # nodes) and OOM-kills the container; set
+  # NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE=1 together with a CPU limit
+  # (frontend.resources.limits.cpu) to pin nginx workers to the allotted CPU.
+  env: []
 
 # -----------------------------------------------------------------------------
 # Authentication mode
