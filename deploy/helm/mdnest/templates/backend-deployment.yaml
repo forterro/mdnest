@@ -91,7 +91,19 @@ spec:
                   key: POSTGRES_PASSWORD
                   {{- end }}
             {{- end }}
-            {{- if and .Values.collab.enabled (or .Values.collab.redis.url .Values.collab.redis.existingSecret) }}
+            {{- if and .Values.collab.enabled .Values.collab.redis.host }}
+            # Compose mode: read the password from an external Secret (e.g. the
+            # KubeBlocks account Secret) and build REDIS_URL at runtime. K8s
+            # expands $(REDIS_PASSWORD) because it is declared earlier in this
+            # same container's env list.
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "collab.redis.passwordSecret.name is required when collab.redis.host is set" .Values.collab.redis.passwordSecret.name }}
+                  key: {{ .Values.collab.redis.passwordSecret.key }}
+            - name: REDIS_URL
+              value: {{ printf "%s://%s:$(REDIS_PASSWORD)@%s:%v/%v" (ternary "rediss" "redis" .Values.collab.redis.tls) .Values.collab.redis.username .Values.collab.redis.host .Values.collab.redis.port .Values.collab.redis.database | quote }}
+            {{- else if and .Values.collab.enabled (or .Values.collab.redis.url .Values.collab.redis.existingSecret) }}
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:

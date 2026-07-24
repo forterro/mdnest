@@ -178,6 +178,19 @@ collab:
     existingSecret: ""
     secretKeys:
       url: REDIS_URL
+    # --- Compose mode (opt-in) ---------------------------------------------
+    # When `host` is set, the chart BUILDS REDIS_URL from these discrete parts
+    # and reads the password from `passwordSecret`. Use this with managed Redis
+    # that only exposes a password (not a full URL), e.g. KubeBlocks Redis or
+    # AWS ElastiCache. Takes precedence over `url` / `existingSecret`.
+    host: ""
+    port: 6379
+    username: default
+    database: 0
+    tls: false
+    passwordSecret:
+      name: ""
+      key: password
 
 # -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.
