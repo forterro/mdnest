@@ -42,6 +42,14 @@ spec:
         - name: frontend
           image: {{ include "mdnest.frontend.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.frontend.workerProcesses }}
+          # Cap nginx worker_processes via a global directive, preserving the
+          # image ENTRYPOINT (/docker-entrypoint.sh) and its bundled nginx.conf.
+          args:
+            - nginx
+            - -g
+            - "daemon off; worker_processes {{ . }};"
+          {{- end }}
           {{- with .Values.frontend.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}

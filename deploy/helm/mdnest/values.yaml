@@ -126,6 +126,10 @@ frontend:
     port: 80
   # WebSocket proxy read/send timeout (seconds) — must stay long for live collab.
   wsTimeoutSeconds: 86400
+  # nginx worker_processes. Empty keeps the image default (`auto` = one worker
+  # per host CPU), which spawns hundreds of workers on large nodes and OOM-kills
+  # the container. Set a small integer for this static file server.
+  workerProcesses: ""
 
 # -----------------------------------------------------------------------------
 # Authentication mode
