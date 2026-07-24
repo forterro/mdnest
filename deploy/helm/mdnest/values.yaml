@@ -1,0 +1,269 @@
+# Default values for the mdnest chart.
+# -----------------------------------------------------------------------------
+# Deployment model
+# -----------------------------------------------------------------------------
+# By DEFAULT this chart deploys mdnest as a SINGLE instance (active/passive):
+#   * backend.replicaCount = 1, Recreate strategy
+#   * notes/secrets PVCs use ReadWriteOnce
+#   * AUTH_MODE=single, live collaboration and Redis disabled
+# This matches mdnest's out-of-the-box behavior exactly.
+#
+# Horizontal scaling (active/active) is OPT-IN. To enable it you MUST:
+#   1. Set auth.mode=multi and provide an external PostgreSQL (postgres.*).
+#   2. Enable collaboration: collab.enabled=true.
+#   3. Provide an external Redis and set collab.redis.url (or redis secret).
+#   4. Use ReadWriteMany storage for notes AND secrets so every replica shares
+#      the same files (persistence.notes.accessMode / persistence.secrets.accessMode).
+#   5. Set backend.replicaCount > 1.
+# The chart validates these invariants and fails fast with a clear message if a
+# multi-replica deployment is missing Redis, collaboration, or RWX storage.
+# -----------------------------------------------------------------------------
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Common labels/annotations applied to all resources.
+commonLabels: {}
+commonAnnotations: {}
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+image:
+  # Container registry / repository for the two images. The CI/CD pipeline
+  # publishes these as ghcr.io/<owner>/mdnest-backend and -frontend.
+  pullPolicy: IfNotPresent
+  backend:
+    repository: ghcr.io/forterro/mdnest-backend
+    # Defaults to Chart.appVersion when empty.
+    tag: ""
+  frontend:
+    repository: ghcr.io/forterro/mdnest-frontend
+    tag: ""
+
+# -----------------------------------------------------------------------------
+# Backend (Go API + WebSocket collaboration server, port 8080)
+# -----------------------------------------------------------------------------
+backend:
+  replicaCount: 1
+  # Recreate is required with ReadWriteOnce notes/secrets volumes (a second pod
+  # cannot mount the volume during a rolling update). Switch to RollingUpdate
+  # only together with ReadWriteMany storage (active/active).
+  strategy:
+    type: Recreate
+  # Public origin the browser uses to reach mdnest. Used for CORS and the SSO
+  # redirect URL. Set this to your ingress URL in production.
+  frontendOrigin: "http://localhost"
+  # Optional display alias shown in the UI (SERVER_ALIAS).
+  serverAlias: ""
+  # Disable the periodic GitHub release update check (DISABLE_UPDATE_CHECK).
+  disableUpdateCheck: false
+  # Extra environment variables (list of {name,value} or {name,valueFrom}).
+  extraEnv: []
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: false
+  securityContext: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Probes hit the unauthenticated GET /api/config endpoint.
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  service:
+    type: ClusterIP
+    port: 8080
+  # Optional HorizontalPodAutoscaler (active/active only — requires RWX storage
+  # + Redis; the chart still enforces those invariants).
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+
+# -----------------------------------------------------------------------------
+# Frontend (nginx static SPA that reverse-proxies /api and /api/ws to backend)
+# -----------------------------------------------------------------------------
+frontend:
+  replicaCount: 1
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext: {}
+  securityContext: {}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+    port: 80
+  # WebSocket proxy read/send timeout (seconds) — must stay long for live collab.
+  wsTimeoutSeconds: 86400
+
+# -----------------------------------------------------------------------------
+# Authentication mode
+#   single = file-based auth, no database (default, matches upstream default)
+#   multi  = multi-user mode backed by external PostgreSQL (required for HA)
+# -----------------------------------------------------------------------------
+auth:
+  mode: single
+  # Bootstrap admin for single mode (MDNEST_USER). Ignored in multi mode.
+  adminUser: admin
+  # Provide credentials either inline (NOT recommended for production) or via an
+  # existing Secret. When existingSecret is set, the chart-managed Secret is not
+  # created and these inline values are ignored.
+  existingSecret: ""
+  # Keys expected inside existingSecret (override if your secret uses others).
+  secretKeys:
+    password: MDNEST_PASSWORD
+    jwtSecret: MDNEST_JWT_SECRET
+  # Inline values (used only when existingSecret is empty). CHANGE THESE.
+  password: ""
+  jwtSecret: ""
+
+# -----------------------------------------------------------------------------
+# External PostgreSQL (required when auth.mode=multi). NOT bundled — point this
+# at a managed / external HA Postgres.
+# -----------------------------------------------------------------------------
+postgres:
+  host: ""
+  port: 5432
+  database: mdnest
+  user: mdnest
+  # Password source: inline (discouraged) or existingSecret.
+  existingSecret: ""
+  secretKeys:
+    password: POSTGRES_PASSWORD
+  password: ""
+
+# -----------------------------------------------------------------------------
+# Live collaboration + optional Redis backplane (opt-in horizontal scaling).
+#   collab.enabled       -> ENABLE_LIVE_COLLAB=true (requires auth.mode=multi)
+#   collab.redis.url     -> REDIS_URL; when set, presence/events sync across
+#                           replicas (active/active). Empty = single instance.
+# -----------------------------------------------------------------------------
+collab:
+  enabled: false
+  redis:
+    # e.g. redis://:password@my-redis:6379/0  (or rediss:// for TLS)
+    url: ""
+    # Or source REDIS_URL from an existing Secret.
+    existingSecret: ""
+    secretKeys:
+      url: REDIS_URL
+
+# -----------------------------------------------------------------------------
+# SSO / OIDC (optional). Only rendered when sso.enabled=true.
+# -----------------------------------------------------------------------------
+sso:
+  enabled: false
+  # USER_PROVIDER=sso when enabled; otherwise "local".
+  issuerUrl: ""
+  clientId: ""
+  redirectUrl: ""            # defaults to <frontendOrigin>/api/auth/sso/callback
+  allowedDomains: ""         # comma-separated
+  providerLabel: "SSO"
+  adminEmails: ""            # comma-separated
+  # Client secret source.
+  existingSecret: ""
+  secretKeys:
+    clientSecret: SSO_CLIENT_SECRET
+  clientSecret: ""
+
+# -----------------------------------------------------------------------------
+# Persistence. notes = the Markdown repository (shared with git-sync); secrets =
+# API tokens / local secrets store. Both must be ReadWriteMany for active/active.
+# -----------------------------------------------------------------------------
+persistence:
+  notes:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 5Gi
+    annotations: {}
+  secrets:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 256Mi
+    annotations: {}
+
+# -----------------------------------------------------------------------------
+# git-sync sidecar (optional). Periodically commits/pushes the notes repo to a
+# git remote, mirroring the upstream git-sync container. Runs as a SINGLE
+# replica (a git working tree has one writer) even in active/active.
+# -----------------------------------------------------------------------------
+gitSync:
+  enabled: false
+  image:
+    repository: alpine/git
+    tag: latest
+    pullPolicy: IfNotPresent
+  intervalSeconds: 600
+  author:
+    name: "mdnest"
+    email: "mdnest@example.com"
+  # Kubernetes Secret containing SSH deploy key(s), mounted read-only at /keys.
+  # Create it yourself (keys must never live in values). Example:
+  #   kubectl create secret generic mdnest-gitsync-keys --from-file=default=./id_ed25519
+  sshSecretName: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Ingress. Routes all traffic to the frontend service, which reverse-proxies
+# /api and /api/ws to the backend (same model as the upstream Caddy/compose
+# setup). WebSocket upgrades pass through nginx.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: mdnest.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Optional PodDisruptionBudget (useful for active/active).
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
