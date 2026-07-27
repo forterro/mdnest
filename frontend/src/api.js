@@ -195,6 +195,23 @@ export async function createNamespace(name) {
   return res.json();
 }
 
+export async function deleteNamespace(name) {
+  const res = await request(`/namespaces?name=${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    let msg = 'Failed to delete namespace';
+    try {
+      const body = await res.json();
+      if (body && body.error) msg = body.error;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export async function getTree(ns) {
   const res = await request(`/tree?ns=${encodeURIComponent(ns)}`);
   if (!res.ok) throw new Error('Failed to load tree');
