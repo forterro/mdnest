@@ -14,15 +14,29 @@ import {
   adminRemoveNamespaceAdmin,
   createNamespace,
   deleteNamespace,
+  getManageableNamespaces,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
 
 function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local', grantMaxDepth = 0 }) {
   const [tab, setTab] = useState('users');
 
-  // Manageable namespaces: superadmin can manage all; namespace admins
-  // only their own.
-  const manageableNs = isSuperAdmin ? namespaces : (namespaces || []).filter((n) => adminNamespaces.includes(n));
+  // Management-plane namespace list. A superadmin no longer has implicit data
+  // access to namespaces, so the `namespaces` prop (which mirrors the sidebar /
+  // data-access list) can't drive namespace management. Fetch the administrable
+  // set from the management endpoint instead; it is already scoped per role
+  // (all for superadmin, own namespaces for a namespace admin). The prop seeds
+  // the initial render to avoid a flash before the fetch resolves.
+  const [manageableNs, setManageableNs] = useState(() =>
+    isSuperAdmin ? (namespaces || []) : (namespaces || []).filter((n) => adminNamespaces.includes(n)),
+  );
+  useEffect(() => {
+    let cancelled = false;
+    getManageableNamespaces()
+      .then((ns) => { if (!cancelled) setManageableNs(ns || []); })
+      .catch(() => { /* keep the seeded list on failure */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // In federated modes (firebase, sso) the IdP owns identity, so the
   // invite form skips username + password (backfilled / unused).
@@ -52,7 +66,7 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
       {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} userProvider={userProvider} />}
       {tab === 'grants' && <GrantsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
-      {tab === 'namespaces' && isSuperAdmin && <NamespacesTab namespaces={namespaces} />}
+      {tab === 'namespaces' && isSuperAdmin && <NamespacesTab namespaces={manageableNs} />}
     </div>
   );
 }
