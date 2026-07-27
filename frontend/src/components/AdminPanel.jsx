@@ -374,7 +374,12 @@ function GrantsTab({ namespaces, grantMaxDepth }) {
 
   useEffect(() => { loadAll().finally(() => setLoading(false)); }, [loadAll]);
 
-  const collaborators = users.filter((u) => u.role === 'collaborator');
+  // Users who can be granted explicit access to note content. Collaborators
+  // never have implicit access; superadmins administer every namespace but
+  // (since the manage/access split) no longer get implicit data access, so
+  // they must be able to self-grant here. Namespace-admins keep implicit
+  // access to the namespaces they administer and are managed elsewhere.
+  const grantableUsers = users.filter((u) => u.role === 'collaborator' || u.role === 'superadmin');
 
   // Group grants by user_id
   const grantsByUser = {};
@@ -406,11 +411,11 @@ function GrantsTab({ namespaces, grantMaxDepth }) {
         <h3>Access Grants</h3>
       </div>
 
-      {collaborators.length === 0 ? (
-        <div className="admin-hint">No collaborators yet. Invite a user first from the Users tab.</div>
+      {grantableUsers.length === 0 ? (
+        <div className="admin-hint">No users to grant yet. Invite a user first from the Users tab.</div>
       ) : (
         <div className="grants-user-list">
-          {collaborators.map((user) => {
+          {grantableUsers.map((user) => {
             const userGrants = grantsByUser[user.id] || [];
             const isExpanded = expandedUser === user.id;
             return (
