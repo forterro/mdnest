@@ -13,6 +13,7 @@ import {
   adminAddNamespaceAdmin,
   adminRemoveNamespaceAdmin,
   createNamespace,
+  deleteNamespace,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
 
@@ -61,10 +62,12 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
 function NamespacesTab({ namespaces }) {
   const [name, setName] = useState('');
   const [created, setCreated] = useState([]);
+  const [deleted, setDeleted] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState('');
 
-  const existing = [...(namespaces || []), ...created];
+  const existing = [...(namespaces || []), ...created].filter((n) => !deleted.includes(n));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -83,13 +86,32 @@ function NamespacesTab({ namespaces }) {
     }
   };
 
+  const remove = async (n) => {
+    setError('');
+    // JSON.stringify reveals trailing/leading whitespace so near-duplicate
+    // namespaces (e.g. "OGI Personal" vs "OGI Personal ") are distinguishable.
+    if (!window.confirm(`Delete namespace ${JSON.stringify(n)} and ALL its notes? This cannot be undone.`)) {
+      return;
+    }
+    setDeleting(n);
+    try {
+      await deleteNamespace(n);
+      setDeleted((prev) => [...prev, n]);
+    } catch (err) {
+      setError(err.message || 'Failed to delete namespace');
+    } finally {
+      setDeleting('');
+    }
+  };
+
   return (
     <div className="admin-section">
       <h3>Namespaces</h3>
       <p className="admin-hint">
-        Create a new namespace. Names may contain letters, digits, dashes and
-        underscores. A page reload is required for a new namespace to appear in
-        the sidebar.
+        Create or delete top-level namespaces. Names may contain letters,
+        digits, spaces, dashes and underscores. Deleting a namespace removes
+        all of its notes and cannot be undone. A page reload is required for
+        changes to appear in the sidebar.
       </p>
       <form className="admin-inline-form" onSubmit={submit}>
         <input
@@ -105,7 +127,17 @@ function NamespacesTab({ namespaces }) {
       {error && <div className="admin-error">{error}</div>}
       <ul className="admin-ns-list">
         {existing.map((n) => (
-          <li key={n}>{n}</li>
+          <li key={n}>
+            <span>{n}</span>
+            <button
+              className="admin-ns-delete"
+              onClick={() => remove(n)}
+              disabled={deleting === n}
+              title="Delete namespace"
+            >
+              {deleting === n ? 'Deleting…' : 'Delete'}
+            </button>
+          </li>
         ))}
       </ul>
     </div>
