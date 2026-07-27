@@ -4,7 +4,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer as createHttpServer } from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
+import { buildOAuth } from "./oauth.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -15,6 +17,11 @@ const USERNAME = process.env.MDNEST_USER;          // fallback: username/passwor
 const PASSWORD = process.env.MDNEST_PASSWORD;
 
 let token = null;
+
+// Per-request auth context. In OAuth mode each MCP request carries the calling
+// user's own mdnest JWT, which we forward to the backend so every action is
+// attributed to that user. Falls back to the process-wide service token.
+const authStore = new AsyncLocalStorage();
 
 // ---------------------------------------------------------------------------
 // Auth helpers
@@ -49,11 +56,16 @@ async function authenticate() {
 // ---------------------------------------------------------------------------
 async function api(path, options = {}, _retried = false) {
   const headers = { ...options.headers };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  // Prefer the per-request user token (OAuth mode); fall back to the
+  // process-wide service token (service mode / stdio).
+  const reqToken = authStore.getStore()?.token || token;
+  if (reqToken) {
+    headers["Authorization"] = `Bearer ${reqToken}`;
   }
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  if (res.status === 401 && !_retried) {
+  // Only the process-wide service token can be silently re-minted on 401.
+  // A per-request user token that expired must surface the 401 to the caller.
+  if (res.status === 401 && !_retried && !authStore.getStore()?.token) {
     await authenticate();
     return api(path, options, true);
   }
@@ -477,10 +489,34 @@ async function startHttp() {
   const host = process.env.MCP_HTTP_HOST || "0.0.0.0";
   const mcpPath = process.env.MCP_HTTP_PATH || "/mcp";
 
+  // Optional OAuth 2.1 mode: require a per-user mdnest JWT (obtained by the MCP
+  // client via the corporate SSO), forwarded to the backend per request so all
+  // actions are attributed to the real user. Default "service" mode keeps the
+  // previous behaviour (process-wide token, unauthenticated endpoint).
+  const authMode = (process.env.MCP_AUTH_MODE || "service").toLowerCase();
+  let oauth = null;
+  if (authMode === "oauth") {
+    const publicUrl = process.env.MCP_PUBLIC_URL;
+    const secret = process.env.MCP_OAUTH_SECRET;
+    const ssoAuthorizeUrl = process.env.MCP_SSO_AUTHORIZE_URL;
+    if (!publicUrl || !secret || !ssoAuthorizeUrl) {
+      console.error("MCP_AUTH_MODE=oauth requires MCP_PUBLIC_URL, MCP_OAUTH_SECRET and MCP_SSO_AUTHORIZE_URL");
+      process.exit(1);
+    }
+    oauth = buildOAuth({
+      publicUrl,
+      mcpPath,
+      secret,
+      ssoAuthorizeUrl,
+      validateUrl: BASE_URL,
+      secureCookie: publicUrl.startsWith("https://"),
+    });
+  }
+
   const jsonError = (id, code, message) =>
     JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: id ?? null });
 
-  const handlePost = async (req, res) => {
+  const handlePost = async (req, res, userToken) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     let body;
@@ -499,7 +535,10 @@ async function startHttp() {
       server.close();
     });
     await server.connect(transport);
-    await transport.handleRequest(req, res, body);
+    // Run the request inside an auth context so api() forwards the caller's
+    // own token to the backend (OAuth mode). In service mode userToken is
+    // undefined and api() falls back to the process-wide token.
+    await authStore.run({ token: userToken }, () => transport.handleRequest(req, res, body));
   };
 
   const httpServer = createHttpServer((req, res) => {
@@ -511,6 +550,11 @@ async function startHttp() {
       return;
     }
 
+    // OAuth 2.1 discovery + authorization endpoints (oauth mode only).
+    if (oauth && oauth.handle(req, res, url)) {
+      return;
+    }
+
     if (url.pathname !== mcpPath) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(jsonError(null, -32601, "Not found"));
@@ -518,7 +562,15 @@ async function startHttp() {
     }
 
     if (req.method === "POST") {
-      handlePost(req, res).catch((err) => {
+      let userToken;
+      if (oauth) {
+        userToken = oauth.bearer(req);
+        if (!userToken) {
+          oauth.challenge(res, jsonError(null, -32001, "Authentication required"));
+          return;
+        }
+      }
+      handlePost(req, res, userToken).catch((err) => {
         console.error("MCP request error:", err);
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
@@ -533,7 +585,7 @@ async function startHttp() {
   });
 
   httpServer.listen(port, host, () => {
-    console.error(`mdnest MCP server (streamable-http) listening on http://${host}:${port}${mcpPath}`);
+    console.error(`mdnest MCP server (streamable-http) listening on http://${host}:${port}${mcpPath}` + (oauth ? " [oauth]" : ""));
   });
 }
 
@@ -541,9 +593,15 @@ async function startHttp() {
 // Start
 // ---------------------------------------------------------------------------
 async function main() {
-  await authenticate();
   const mode = (process.env.MCP_TRANSPORT || "stdio").toLowerCase();
-  if (mode === "http" || mode === "streamable-http") {
+  const httpMode = mode === "http" || mode === "streamable-http";
+  const oauthMode = httpMode && (process.env.MCP_AUTH_MODE || "service").toLowerCase() === "oauth";
+  // In OAuth mode the backend credential is supplied per request by each user,
+  // so no process-wide service token is needed. Otherwise authenticate now.
+  if (!oauthMode) {
+    await authenticate();
+  }
+  if (httpMode) {
     await startHttp();
   } else {
     await startStdio();
