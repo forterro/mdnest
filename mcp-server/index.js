@@ -2,6 +2,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createServer as createHttpServer } from "node:http";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -98,10 +100,16 @@ function treeToText(node, indent = 0) {
 // ---------------------------------------------------------------------------
 // MCP Server setup
 // ---------------------------------------------------------------------------
-const server = new McpServer({
-  name: "mdnest",
-  version: "0.1.0",
-});
+// Build a fully-configured MCP server instance. Using a factory (instead of a
+// module-level singleton) lets the streamable-HTTP transport spin up an
+// isolated server per request, which avoids cross-client request-id
+// collisions. The stdio path builds a single instance, so its behaviour is
+// unchanged.
+function createServer() {
+  const server = new McpServer({
+    name: "mdnest",
+    version: "0.1.0",
+  });
 
 // ---------------------------------------------------------------------------
 // Tools
@@ -446,13 +454,100 @@ server.resource(
   }
 );
 
+  return server;
+}
+
+// ---------------------------------------------------------------------------
+// Transports
+// ---------------------------------------------------------------------------
+
+// Default: stdio (unchanged behaviour). Opt in to network mode by setting
+// MCP_TRANSPORT=http (a.k.a. "streamable-http").
+async function startStdio() {
+  const server = createServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+// Streamable-HTTP transport, stateless: each POST is served by a fresh
+// server + transport pair. GET (server-initiated SSE streams) and DELETE
+// (session teardown) are unused in stateless mode and return 405.
+async function startHttp() {
+  const port = parseInt(process.env.MCP_HTTP_PORT || "3000", 10);
+  const host = process.env.MCP_HTTP_HOST || "0.0.0.0";
+  const mcpPath = process.env.MCP_HTTP_PATH || "/mcp";
+
+  const jsonError = (id, code, message) =>
+    JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: id ?? null });
+
+  const handlePost = async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    let body;
+    try {
+      body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(jsonError(null, -32700, "Parse error"));
+      return;
+    }
+
+    const server = createServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      transport.close();
+      server.close();
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, body);
+  };
+
+  const httpServer = createHttpServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("ok");
+      return;
+    }
+
+    if (url.pathname !== mcpPath) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(jsonError(null, -32601, "Not found"));
+      return;
+    }
+
+    if (req.method === "POST") {
+      handlePost(req, res).catch((err) => {
+        console.error("MCP request error:", err);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(jsonError(null, -32603, "Internal error"));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" });
+    res.end(jsonError(null, -32000, "Method not allowed (stateless streamable-http accepts POST only)"));
+  });
+
+  httpServer.listen(port, host, () => {
+    console.error(`mdnest MCP server (streamable-http) listening on http://${host}:${port}${mcpPath}`);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 async function main() {
   await authenticate();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  const mode = (process.env.MCP_TRANSPORT || "stdio").toLowerCase();
+  if (mode === "http" || mode === "streamable-http") {
+    await startHttp();
+  } else {
+    await startStdio();
+  }
 }
 
 main().catch((err) => {
