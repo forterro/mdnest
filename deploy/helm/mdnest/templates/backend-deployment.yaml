@@ -44,6 +44,32 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.backend.namespaces }}
+      initContainers:
+        # Ensure the configured top-level namespaces (note folders) exist under
+        # /data/notes. Idempotent and self-healing on every (re)start. When the
+        # list is empty (default) this init container is not rendered, so the
+        # existing behavior is unchanged.
+        - name: provision-namespaces
+          image: {{ $.Values.backend.namespaceInitImage }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for ns in {{ range . }}{{ . | quote }} {{ end }}; do
+                echo "ensuring namespace: ${ns}"
+                mkdir -p "/data/notes/${ns}"
+              done
+          {{- with $.Values.backend.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: notes
+              mountPath: /data/notes
+      {{- end }}
       containers:
         - name: backend
           image: {{ include "mdnest.backend.image" . }}

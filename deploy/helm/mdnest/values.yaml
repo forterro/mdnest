@@ -64,6 +64,13 @@ backend:
   disableUpdateCheck: false
   # Extra environment variables (list of {name,value} or {name,valueFrom}).
   extraEnv: []
+  # Top-level namespaces (note folders) to ensure exist under /data/notes on
+  # startup. Each entry is created via an idempotent init container. Leave empty
+  # (default) to disable the init container entirely — existing behavior is
+  # unchanged. Names must not contain "/" or "\" and must not start with ".".
+  namespaces: []
+  # Image used by the namespace-provisioning init container.
+  namespaceInitImage: busybox:1.36
   podAnnotations: {}
   podLabels: {}
   podSecurityContext:
