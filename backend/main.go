@@ -504,7 +504,7 @@ func main() {
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
-		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore, stg)
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
 		// Per-namespace scoping is done inside each handler so namespace
