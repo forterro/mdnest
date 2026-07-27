@@ -44,6 +44,11 @@ image:
   frontend:
     repository: ghcr.io/forterro/mdnest-frontend
     tag: ""
+  mcp:
+    # Optional MCP server image (see the mcp.* section below). Published by CI
+    # as ghcr.io/<owner>/mdnest-mcp-server.
+    repository: ghcr.io/forterro/mdnest-mcp-server
+    tag: ""
 
 # -----------------------------------------------------------------------------
 # Backend (Go API + WebSocket collaboration server, port 8080)
@@ -64,6 +69,13 @@ backend:
   disableUpdateCheck: false
   # Extra environment variables (list of {name,value} or {name,valueFrom}).
   extraEnv: []
+  # Top-level namespaces (note folders) to ensure exist under /data/notes on
+  # startup. Each entry is created via an idempotent init container. Leave empty
+  # (default) to disable the init container entirely — existing behavior is
+  # unchanged. Names must not contain "/" or "\" and must not start with ".".
+  namespaces: []
+  # Image used by the namespace-provisioning init container.
+  namespaceInitImage: busybox:1.36
   podAnnotations: {}
   podLabels: {}
   podSecurityContext:
@@ -286,3 +298,49 @@ podDisruptionBudget:
   enabled: false
   minAvailable: 1
   maxUnavailable: ""
+
+# -----------------------------------------------------------------------------
+# MCP server (opt-in). Exposes mdnest over the Model Context Protocol using the
+# streamable-HTTP transport. DISABLED by default: when mcp.enabled is false no
+# extra resources are rendered and the deployment is unchanged. When enabled it
+# adds a Deployment + Service (and optional Ingress) running the mdnest-mcp-server
+# image, which talks to the backend API in-cluster with a service API token.
+# -----------------------------------------------------------------------------
+mcp:
+  enabled: false
+  replicaCount: 1
+  # URL the MCP server uses to reach the mdnest backend API. Defaults to the
+  # in-cluster backend service (http://<release>-backend:<backend.service.port>)
+  # when left empty.
+  mdnestUrl: ""
+  # mdnest API token (mdnest_...) the MCP server authenticates with. Provide it
+  # inline via auth.token (chart creates a Secret), or reference an existing
+  # Secret via auth.existingSecret / auth.existingSecretKey.
+  auth:
+    token: ""
+    existingSecret: ""
+    existingSecretKey: token
+  http:
+    port: 3000
+    path: /mcp
+  service:
+    type: ClusterIP
+    port: 3000
+  # Extra environment variables appended to the MCP container.
+  extraEnv: []
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Optional standard Ingress for the MCP endpoint (Forterro deployments may
+  # instead expose it via a Traefik IngressRoute at the umbrella level).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
