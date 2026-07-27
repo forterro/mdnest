@@ -12,7 +12,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json index.js ./
+COPY package.json index.js oauth.js ./
 
 # Default to the streamable-HTTP transport when running as a container/service.
 # (The stdio transport remains available by overriding MCP_TRANSPORT=stdio.)
