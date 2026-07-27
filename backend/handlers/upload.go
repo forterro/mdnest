@@ -8,15 +8,17 @@ import (
 	"path"
 	"strings"
 
+	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
 )
 
 type UploadHandler struct {
 	store storage.Storage
+	perms *middleware.PermissionChecker
 }
 
-func NewUploadHandler(store storage.Storage) *UploadHandler {
-	return &UploadHandler{store: store}
+func NewUploadHandler(store storage.Storage, perms *middleware.PermissionChecker) *UploadHandler {
+	return &UploadHandler{store: store, perms: perms}
 }
 
 // HandleFolder handles POST /api/folder?ns=...&path=...
@@ -118,6 +120,16 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 
 	if len(parts) < 2 || parts[1] == "" {
 		http.Error(w, `{"error":"missing file path"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Enforce the same per-namespace read permission as every other content
+	// endpoint. Without this an authenticated user could fetch any file in any
+	// namespace by guessing the URL (the /api/files/ route can't use the query
+	// param middleware because the namespace lives in the path). Nil perms means
+	// single-user mode, where all access is granted.
+	if h.perms != nil && !h.perms.CheckRead(r, ns, "/"+parts[1]) {
+		middleware.DenyJSON(w)
 		return
 	}
 
