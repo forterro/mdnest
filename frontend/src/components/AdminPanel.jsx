@@ -467,12 +467,12 @@ function GrantsTab({ namespaces, grantMaxDepth }) {
 
   useEffect(() => { loadAll().finally(() => setLoading(false)); }, [loadAll]);
 
-  // Users who can be granted explicit access to note content. Collaborators
-  // never have implicit access; superadmins administer every namespace but
-  // (since the manage/access split) no longer get implicit data access, so
-  // they must be able to self-grant here. Namespace-admins keep implicit
-  // access to the namespaces they administer and are managed elsewhere.
-  const grantableUsers = users.filter((u) => u.role === 'collaborator' || u.role === 'superadmin');
+  // Any user can be granted explicit collaborator-style access to note
+  // content, so all roles are listed here. Collaborators and superadmins have
+  // no implicit data access at all (since the manage/access split). Admins
+  // implicitly reach the namespaces they administer, but still need explicit
+  // grants to access *other* namespaces — hence they are grantable too.
+  const grantableUsers = users;
 
   // Group grants by user_id
   const grantsByUser = {};
