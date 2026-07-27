@@ -153,6 +153,28 @@ spec:
                   key: SSO_CLIENT_SECRET
                   {{- end }}
             {{- end }}
+            {{- if eq .Values.storage.backend "s3" }}
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.storage.s3.existingSecret }}
+                  name: {{ .Values.storage.s3.existingSecret }}
+                  key: {{ .Values.storage.s3.secretKeys.accessKey }}
+                  {{- else }}
+                  name: {{ include "mdnest.appSecretName" . }}
+                  key: S3_ACCESS_KEY
+                  {{- end }}
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.storage.s3.existingSecret }}
+                  name: {{ .Values.storage.s3.existingSecret }}
+                  key: {{ .Values.storage.s3.secretKeys.secretKey }}
+                  {{- else }}
+                  name: {{ include "mdnest.appSecretName" . }}
+                  key: S3_SECRET_KEY
+                  {{- end }}
+            {{- end }}
             {{- with .Values.backend.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

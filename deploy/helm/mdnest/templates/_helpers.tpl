@@ -97,8 +97,8 @@ separate note files). Fail fast with an actionable message.
   {{- if not $redisUrl -}}
     {{- fail "mdnest: running multiple backend replicas requires an external Redis (collab.redis.url, collab.redis.existingSecret, or collab.redis.host) for the presence/event backplane." -}}
   {{- end -}}
-  {{- if ne .Values.persistence.notes.accessMode "ReadWriteMany" -}}
-    {{- fail "mdnest: running multiple backend replicas requires persistence.notes.accessMode=ReadWriteMany so all pods share the notes repository." -}}
+  {{- if and (ne .Values.storage.backend "s3") (ne .Values.persistence.notes.accessMode "ReadWriteMany") -}}
+    {{- fail "mdnest: running multiple backend replicas requires persistence.notes.accessMode=ReadWriteMany so all pods share the notes repository (or set storage.backend=s3 to share notes via an object store)." -}}
   {{- end -}}
   {{- if and .Values.persistence.secrets.enabled (ne .Values.persistence.secrets.accessMode "ReadWriteMany") -}}
     {{- fail "mdnest: running multiple backend replicas requires persistence.secrets.accessMode=ReadWriteMany so all pods share the token/secrets store." -}}
