@@ -1,0 +1,397 @@
+# Default values for the mdnest chart.
+# -----------------------------------------------------------------------------
+# Deployment model
+# -----------------------------------------------------------------------------
+# By DEFAULT this chart deploys mdnest as a SINGLE instance (active/passive):
+#   * backend.replicaCount = 1, Recreate strategy
+#   * notes/secrets PVCs use ReadWriteOnce
+#   * AUTH_MODE=single, live collaboration and Redis disabled
+# This matches mdnest's out-of-the-box behavior exactly.
+#
+# Horizontal scaling (active/active) is OPT-IN. To enable it you MUST:
+#   1. Set auth.mode=multi and provide an external PostgreSQL (postgres.*).
+#   2. Enable collaboration: collab.enabled=true.
+#   3. Provide an external Redis and set collab.redis.url (or redis secret).
+#   4. Use ReadWriteMany storage for notes AND secrets so every replica shares
+#      the same files (persistence.notes.accessMode / persistence.secrets.accessMode).
+#   5. Set backend.replicaCount > 1.
+# The chart validates these invariants and fails fast with a clear message if a
+# multi-replica deployment is missing Redis, collaboration, or RWX storage.
+# -----------------------------------------------------------------------------
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Common labels/annotations applied to all resources.
+commonLabels: {}
+commonAnnotations: {}
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+image:
+  # Container registry / repository for the two images. The CI/CD pipeline
+  # publishes these as ghcr.io/<owner>/mdnest-backend and -frontend.
+  pullPolicy: IfNotPresent
+  backend:
+    repository: ghcr.io/forterro/mdnest-backend
+    # Defaults to Chart.appVersion when empty.
+    tag: ""
+  frontend:
+    repository: ghcr.io/forterro/mdnest-frontend
+    tag: ""
+  mcp:
+    # Optional MCP server image (see the mcp.* section below). Published by CI
+    # as ghcr.io/<owner>/mdnest-mcp-server.
+    repository: ghcr.io/forterro/mdnest-mcp-server
+    tag: ""
+
+# -----------------------------------------------------------------------------
+# Backend (Go API + WebSocket collaboration server, port 8080)
+# -----------------------------------------------------------------------------
+backend:
+  replicaCount: 1
+  # Recreate is required with ReadWriteOnce notes/secrets volumes (a second pod
+  # cannot mount the volume during a rolling update). Switch to RollingUpdate
+  # only together with ReadWriteMany storage (active/active).
+  strategy:
+    type: Recreate
+  # Public origin the browser uses to reach mdnest. Used for CORS and the SSO
+  # redirect URL. Set this to your ingress URL in production.
+  frontendOrigin: "http://localhost"
+  # Optional display alias shown in the UI (SERVER_ALIAS).
+  serverAlias: ""
+  # Disable the periodic GitHub release update check (DISABLE_UPDATE_CHECK).
+  disableUpdateCheck: false
+  # Extra environment variables (list of {name,value} or {name,valueFrom}).
+  extraEnv: []
+  # Top-level namespaces (note folders) to ensure exist under /data/notes on
+  # startup. Each entry is created via an idempotent init container. Leave empty
+  # (default) to disable the init container entirely — existing behavior is
+  # unchanged. Names must not contain "/" or "\" and must not start with ".".
+  namespaces: []
+  # Image used by the namespace-provisioning init container.
+  namespaceInitImage: busybox:1.36
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: false
+  securityContext: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Probes hit the unauthenticated GET /api/config endpoint.
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  service:
+    type: ClusterIP
+    port: 8080
+  # Optional HorizontalPodAutoscaler (active/active only — requires RWX storage
+  # + Redis; the chart still enforces those invariants).
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+
+# -----------------------------------------------------------------------------
+# Frontend (nginx static SPA that reverse-proxies /api and /api/ws to backend)
+# -----------------------------------------------------------------------------
+frontend:
+  replicaCount: 1
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext: {}
+  securityContext: {}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+    port: 80
+  # WebSocket proxy read/send timeout (seconds) — must stay long for live collab.
+  wsTimeoutSeconds: 86400
+  # Extra environment variables for the nginx container. The image default
+  # `worker_processes auto` starts one worker per host CPU (hundreds on large
+  # nodes) and OOM-kills the container; set
+  # NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE=1 together with a CPU limit
+  # (frontend.resources.limits.cpu) to pin nginx workers to the allotted CPU.
+  env: []
+
+# -----------------------------------------------------------------------------
+# Authentication mode
+#   single = file-based auth, no database (default, matches upstream default)
+#   multi  = multi-user mode backed by external PostgreSQL (required for HA)
+# -----------------------------------------------------------------------------
+auth:
+  mode: single
+  # Bootstrap admin for single mode (MDNEST_USER). Ignored in multi mode.
+  adminUser: admin
+  # Provide credentials either inline (NOT recommended for production) or via an
+  # existing Secret. When existingSecret is set, the chart-managed Secret is not
+  # created and these inline values are ignored.
+  existingSecret: ""
+  # Keys expected inside existingSecret (override if your secret uses others).
+  secretKeys:
+    password: MDNEST_PASSWORD
+    jwtSecret: MDNEST_JWT_SECRET
+  # Inline values (used only when existingSecret is empty). CHANGE THESE.
+  password: ""
+  jwtSecret: ""
+
+# -----------------------------------------------------------------------------
+# External PostgreSQL (required when auth.mode=multi). NOT bundled — point this
+# at a managed / external HA Postgres.
+# -----------------------------------------------------------------------------
+postgres:
+  host: ""
+  port: 5432
+  database: mdnest
+  user: mdnest
+  # Password source: inline (discouraged) or existingSecret.
+  existingSecret: ""
+  secretKeys:
+    password: POSTGRES_PASSWORD
+  password: ""
+
+# -----------------------------------------------------------------------------
+# Live collaboration + optional Redis backplane (opt-in horizontal scaling).
+#   collab.enabled       -> ENABLE_LIVE_COLLAB=true (requires auth.mode=multi)
+#   collab.redis.url     -> REDIS_URL; when set, presence/events sync across
+#                           replicas (active/active). Empty = single instance.
+# -----------------------------------------------------------------------------
+collab:
+  enabled: false
+  redis:
+    # e.g. redis://:password@my-redis:6379/0  (or rediss:// for TLS)
+    url: ""
+    # Or source REDIS_URL from an existing Secret.
+    existingSecret: ""
+    secretKeys:
+      url: REDIS_URL
+    # --- Compose mode (opt-in) ---------------------------------------------
+    # When `host` is set, the chart BUILDS REDIS_URL from these discrete parts
+    # and reads the password from `passwordSecret`. Use this with managed Redis
+    # that only exposes a password (not a full URL), e.g. KubeBlocks Redis or
+    # AWS ElastiCache. Takes precedence over `url` / `existingSecret`.
+    host: ""
+    port: 6379
+    username: default
+    database: 0
+    tls: false
+    passwordSecret:
+      name: ""
+      key: password
+
+# -----------------------------------------------------------------------------
+# SSO / OIDC (optional). Only rendered when sso.enabled=true.
+# -----------------------------------------------------------------------------
+sso:
+  enabled: false
+  # USER_PROVIDER=sso when enabled; otherwise "local".
+  issuerUrl: ""
+  clientId: ""
+  redirectUrl: ""            # defaults to <frontendOrigin>/api/auth/sso/callback
+  allowedDomains: ""         # comma-separated
+  providerLabel: "SSO"
+  adminEmails: ""            # comma-separated
+  # Client secret source.
+  existingSecret: ""
+  secretKeys:
+    clientSecret: SSO_CLIENT_SECRET
+  clientSecret: ""
+
+# -----------------------------------------------------------------------------
+# Storage backend for note data.
+#   local (default) = notes live on the `notes` PVC (filesystem). Behaviour is
+#                     byte-identical to upstream.
+#   s3              = notes live in an S3-compatible object store (Scaleway,
+#                     Ceph/RGW, MinIO, AWS S3). This lets multiple backend
+#                     replicas share notes WITHOUT ReadWriteMany storage, and
+#                     enables self-service namespace creation.
+# Note history (git) and the git-sync sidecar always use the local filesystem
+# and stay optional/orthogonal to this setting.
+# -----------------------------------------------------------------------------
+storage:
+  backend: local
+  s3:
+    # host[:port] WITHOUT scheme, e.g. s3.fr-par.scw.cloud
+    endpoint: ""
+    bucket: ""
+    region: us-east-1
+    useSSL: true
+    # Path-style addressing (bucket in the URL path). Required for MinIO / Ceph
+    # RGW; AWS and Scaleway also accept it. Set false only if your endpoint
+    # requires virtual-hosted-style addressing.
+    pathStyle: true
+    # Credentials source: inline (discouraged) or an existing Secret — e.g. one
+    # synced from Vault by an ExternalSecret. When existingSecret is set the
+    # inline accessKey/secretKey are ignored and the chart-managed Secret does
+    # not carry the S3 keys.
+    existingSecret: ""
+    secretKeys:
+      accessKey: S3_ACCESS_KEY
+      secretKey: S3_SECRET_KEY
+    accessKey: ""
+    secretKey: ""
+
+# -----------------------------------------------------------------------------
+# Persistence. notes = the Markdown repository (shared with git-sync); secrets =
+# API tokens / local secrets store. Both must be ReadWriteMany for active/active.
+# -----------------------------------------------------------------------------
+persistence:
+  notes:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 5Gi
+    annotations: {}
+  secrets:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 256Mi
+    annotations: {}
+
+# -----------------------------------------------------------------------------
+# git-sync sidecar (optional). Periodically commits/pushes the notes repo to a
+# git remote, mirroring the upstream git-sync container. Runs as a SINGLE
+# replica (a git working tree has one writer) even in active/active.
+# -----------------------------------------------------------------------------
+gitSync:
+  enabled: false
+  image:
+    repository: alpine/git
+    tag: latest
+    pullPolicy: IfNotPresent
+  intervalSeconds: 600
+  author:
+    name: "mdnest"
+    email: "mdnest@example.com"
+  # Kubernetes Secret containing SSH deploy key(s), mounted read-only at /keys.
+  # Create it yourself (keys must never live in values). Example:
+  #   kubectl create secret generic mdnest-gitsync-keys --from-file=default=./id_ed25519
+  sshSecretName: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Ingress. Routes all traffic to the frontend service, which reverse-proxies
+# /api and /api/ws to the backend (same model as the upstream Caddy/compose
+# setup). WebSocket upgrades pass through nginx.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: mdnest.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Optional PodDisruptionBudget (useful for active/active).
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+# -----------------------------------------------------------------------------
+# MCP server (opt-in). Exposes mdnest over the Model Context Protocol using the
+# streamable-HTTP transport. DISABLED by default: when mcp.enabled is false no
+# extra resources are rendered and the deployment is unchanged. When enabled it
+# adds a Deployment + Service (and optional Ingress) running the mdnest-mcp-server
+# image, which talks to the backend API in-cluster with a service API token.
+# -----------------------------------------------------------------------------
+mcp:
+  enabled: false
+  replicaCount: 1
+  # URL the MCP server uses to reach the mdnest backend API. Defaults to the
+  # in-cluster backend service (http://<release>-backend:<backend.service.port>)
+  # when left empty.
+  mdnestUrl: ""
+  # mdnest API token (mdnest_...) the MCP server authenticates with. Provide it
+  # inline via auth.token (chart creates a Secret), or reference an existing
+  # Secret via auth.existingSecret / auth.existingSecretKey.
+  auth:
+    token: ""
+    existingSecret: ""
+    existingSecretKey: token
+  # Per-user OAuth 2.1 mode. When enabled the MCP server acts as an OAuth
+  # Authorization/Resource Server and delegates login to mdnest's SSO, so every
+  # MCP action is attributed to the signed-in user instead of a shared service
+  # token. When disabled (default) the server uses the service token above.
+  oauth:
+    enabled: false
+    # Public HTTPS base URL clients reach the MCP server on (no trailing slash).
+    publicUrl: ""
+    # mdnest backend SSO start endpoint (e.g. https://<host>/api/auth/sso/start).
+    ssoAuthorizeUrl: ""
+    # HMAC secret used to sign OAuth transaction cookies and authorization codes.
+    # Provide inline via secret.value (chart creates a Secret) or reference an
+    # existing Secret via secret.existingSecret / secret.existingSecretKey.
+    secret:
+      value: ""
+      existingSecret: ""
+      existingSecretKey: oauth-secret
+  http:
+    port: 3000
+    path: /mcp
+  service:
+    type: ClusterIP
+    port: 3000
+  # Extra environment variables appended to the MCP container.
+  extraEnv: []
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Optional standard Ingress for the MCP endpoint (Forterro deployments may
+  # instead expose it via a Traefik IngressRoute at the umbrella level).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
