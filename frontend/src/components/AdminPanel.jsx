@@ -12,6 +12,7 @@ import {
   adminListNamespaceAdmins,
   adminAddNamespaceAdmin,
   adminRemoveNamespaceAdmin,
+  createNamespace,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
 
@@ -43,10 +44,70 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
         <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}>Users</button>
         <button className={tab === 'grants' ? 'active' : ''} onClick={() => setTab('grants')}>Access Grants</button>
         <button className={tab === 'nsadmins' ? 'active' : ''} onClick={() => setTab('nsadmins')}>Namespace Admins</button>
+        {isSuperAdmin && (
+          <button className={tab === 'namespaces' ? 'active' : ''} onClick={() => setTab('namespaces')}>Namespaces</button>
+        )}
       </div>
       {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} userProvider={userProvider} />}
       {tab === 'grants' && <GrantsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
+      {tab === 'namespaces' && isSuperAdmin && <NamespacesTab namespaces={namespaces} />}
+    </div>
+  );
+}
+
+// NamespacesTab — superadmin-only. Create new top-level namespaces. In S3
+// mode a namespace is a key prefix; in local mode it is a top-level folder.
+function NamespacesTab({ namespaces }) {
+  const [name, setName] = useState('');
+  const [created, setCreated] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const existing = [...(namespaces || []), ...created];
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setLoading(true);
+    try {
+      const res = await createNamespace(trimmed);
+      setCreated((prev) => [...prev, res.namespace || trimmed]);
+      setName('');
+    } catch (err) {
+      setError(err.message || 'Failed to create namespace');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="admin-section">
+      <h3>Namespaces</h3>
+      <p className="admin-hint">
+        Create a new namespace. Names may contain letters, digits, dashes and
+        underscores. A page reload is required for a new namespace to appear in
+        the sidebar.
+      </p>
+      <form className="admin-inline-form" onSubmit={submit}>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="new-namespace"
+        />
+        <button type="submit" disabled={loading || !name.trim()}>
+          {loading ? 'Creating…' : 'Create namespace'}
+        </button>
+      </form>
+      {error && <div className="admin-error">{error}</div>}
+      <ul className="admin-ns-list">
+        {existing.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
     </div>
   );
 }
