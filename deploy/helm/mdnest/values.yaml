@@ -320,6 +320,23 @@ mcp:
     token: ""
     existingSecret: ""
     existingSecretKey: token
+  # Per-user OAuth 2.1 mode. When enabled the MCP server acts as an OAuth
+  # Authorization/Resource Server and delegates login to mdnest's SSO, so every
+  # MCP action is attributed to the signed-in user instead of a shared service
+  # token. When disabled (default) the server uses the service token above.
+  oauth:
+    enabled: false
+    # Public HTTPS base URL clients reach the MCP server on (no trailing slash).
+    publicUrl: ""
+    # mdnest backend SSO start endpoint (e.g. https://<host>/api/auth/sso/start).
+    ssoAuthorizeUrl: ""
+    # HMAC secret used to sign OAuth transaction cookies and authorization codes.
+    # Provide inline via secret.value (chart creates a Secret) or reference an
+    # existing Secret via secret.existingSecret / secret.existingSecretKey.
+    secret:
+      value: ""
+      existingSecret: ""
+      existingSecretKey: oauth-secret
   http:
     port: 3000
     path: /mcp

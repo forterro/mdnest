@@ -60,6 +60,7 @@ spec:
               value: {{ .Values.mcp.http.path | quote }}
             - name: MDNEST_URL
               value: {{ .Values.mcp.mdnestUrl | default (printf "http://%s:%v" (include "mdnest.backend.fullname" .) .Values.backend.service.port) | quote }}
+            {{- if or (not .Values.mcp.oauth.enabled) .Values.mcp.auth.existingSecret .Values.mcp.auth.token }}
             - name: MDNEST_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -70,6 +71,25 @@ spec:
                   name: {{ include "mdnest.mcp.secretName" . }}
                   key: token
                   {{- end }}
+            {{- end }}
+            {{- if .Values.mcp.oauth.enabled }}
+            - name: MCP_AUTH_MODE
+              value: "oauth"
+            - name: MCP_PUBLIC_URL
+              value: {{ required "mcp.oauth.publicUrl is required when mcp.oauth.enabled" .Values.mcp.oauth.publicUrl | quote }}
+            - name: MCP_SSO_AUTHORIZE_URL
+              value: {{ required "mcp.oauth.ssoAuthorizeUrl is required when mcp.oauth.enabled" .Values.mcp.oauth.ssoAuthorizeUrl | quote }}
+            - name: MCP_OAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.mcp.oauth.secret.existingSecret }}
+                  name: {{ .Values.mcp.oauth.secret.existingSecret }}
+                  key: {{ .Values.mcp.oauth.secret.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "mdnest.mcp.secretName" . }}
+                  key: oauth-secret
+                  {{- end }}
+            {{- end }}
             {{- with .Values.mcp.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
