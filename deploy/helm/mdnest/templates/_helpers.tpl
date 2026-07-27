@@ -41,6 +41,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "mdnest.backend.fullname" -}}{{ printf "%s-backend" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.frontend.fullname" -}}{{ printf "%s-frontend" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.gitsync.fullname" -}}{{ printf "%s-git-sync" (include "mdnest.fullname" .) }}{{- end -}}
+{{- define "mdnest.mcp.fullname" -}}{{ printf "%s-mcp" (include "mdnest.fullname" .) }}{{- end -}}
 
 {{- define "mdnest.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
@@ -59,6 +60,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $tag := default .Chart.AppVersion .Values.image.frontend.tag -}}
 {{- printf "%s:%s" .Values.image.frontend.repository $tag -}}
 {{- end -}}
+{{- define "mdnest.mcp.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.image.mcp.tag -}}
+{{- printf "%s:%s" .Values.image.mcp.repository $tag -}}
+{{- end -}}
+{{- define "mdnest.mcp.secretName" -}}{{ printf "%s-mcp" (include "mdnest.fullname" .) }}{{- end -}}
 
 {{/* Names of chart-managed secrets/configmaps. */}}
 {{- define "mdnest.appSecretName" -}}{{ printf "%s-app" (include "mdnest.fullname" .) }}{{- end -}}
