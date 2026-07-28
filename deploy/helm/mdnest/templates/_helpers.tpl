@@ -99,9 +99,6 @@ Delete a guard in the same change that lands the capability behind it.
 {{- if $redis -}}
   {{- fail "mdnest: the Redis collaboration backplane is not implemented in this release. REDIS_URL would be injected and ignored, so collaboration state would diverge per pod instead of syncing. Leave collab.redis.* empty and run a single backend replica." -}}
 {{- end -}}
-{{- if .Values.mcp.enabled -}}
-  {{- fail "mdnest: mcp.enabled=true requires the MCP server's streamable-HTTP transport, which is not in this release — the bundled MCP server speaks stdio only, so the Service and Ingress would route to a port nothing listens on. Run the MCP server alongside your client over stdio instead." -}}
-{{- end -}}
 {{- end -}}
 
 {{/*

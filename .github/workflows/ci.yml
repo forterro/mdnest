@@ -57,9 +57,10 @@ jobs:
       - name: Render defaults (single instance)
         run: helm template ci deploy/helm/mdnest > /dev/null
       - name: Render the full supported configuration
-        # Multi-mode + live collaboration + git-sync on a single backend replica
-        # is the largest configuration this release actually implements. The
-        # active/active variant is asserted to be REJECTED below, not rendered.
+        # Multi-mode + live collaboration + git-sync + the MCP server (per-user
+        # OAuth) on a single backend replica is the largest configuration this
+        # release actually implements. The active/active variant is asserted to
+        # be REJECTED below, not rendered.
         run: |
           helm template ci deploy/helm/mdnest \
             --set auth.mode=multi \
@@ -67,7 +68,12 @@ jobs:
             --set postgres.password=x \
             --set collab.enabled=true \
             --set gitSync.enabled=true \
-            --set gitSync.sshSecretName=keys > rendered-ha.yaml
+            --set gitSync.sshSecretName=keys \
+            --set mcp.enabled=true \
+            --set mcp.oauth.enabled=true \
+            --set mcp.oauth.publicUrl=https://mcp.example \
+            --set mcp.oauth.ssoAuthorizeUrl=https://notes.example/api/auth/sso/start \
+            --set mcp.oauth.secret.value=ci-oauth-secret > rendered-ha.yaml
       - name: Reject options the code does not implement
         # The chart's values surface must not outrun the backend. Each option
         # here would otherwise deploy "healthy" while doing the wrong thing, so
@@ -89,8 +95,6 @@ jobs:
             --set storage.backend=s3
           expect_reject "collab.redis.* (no presence/event backplane)" \
             --set collab.redis.url=redis://redis.example:6379/0
-          expect_reject "mcp.enabled (MCP server is stdio-only)" \
-            --set mcp.enabled=true
           expect_reject "backend.replicaCount=3 (active/active needs the backplane)" \
             --set auth.mode=multi --set postgres.host=pg.example --set postgres.password=x \
             --set collab.enabled=true --set backend.replicaCount=3 \
