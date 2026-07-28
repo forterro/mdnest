@@ -20,13 +20,14 @@ PostgreSQL and Redis are **never bundled**: point the chart at external/managed 
 
 > [!IMPORTANT]
 > **Not every option below is available yet.** The chart is versioned with mdnest,
-> and one opt-in capability documented here is not implemented in this
+> and two opt-in capabilities documented here are not implemented in this
 > release — the chart **refuses to install** rather than come up "healthy" while
 > doing the wrong thing:
 >
 > | Option | Why it is rejected |
 > |---|---|
-> | `storage.backend=s3` | The backend reads notes from the filesystem and ignores `S3_*`; notes would land on the PVC, not your bucket. |
+> | `collab.redis.*` | There is no presence/event backplane, so replicas would diverge instead of syncing. |
+> | `mcp.enabled=true` | The bundled MCP server speaks stdio only; the Service and Ingress would route to a port nothing listens on. |
 >
 > **Supported today:** `single` or `multi` mode, live collaboration, git-sync,
 > ingress, TLS, and active/active (`backend.replicaCount > 1`) with a Redis
@@ -138,7 +139,7 @@ collab:
 
 ### Storage backend (local vs S3)
 
-`storage.backend=local` (default) keeps notes on the `notes` PVC — byte-identical to upstream. Set `storage.backend=s3` to store notes in an S3-compatible bucket, which lets multiple replicas share notes **without** ReadWriteMany storage and enables self-service namespace creation:
+`storage.backend=local` (default) keeps notes on the `notes` PVC — byte-identical to upstream. Set `storage.backend=s3` to store notes in an S3-compatible bucket, which lets multiple replicas share notes **without** ReadWriteMany storage:
 
 ```yaml
 storage:
@@ -375,7 +376,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | sso.redirectUrl | string | `""` | OAuth redirect URL; defaults to `<frontendOrigin>/api/auth/sso/callback`. |
 | sso.secretKeys | object | `{"clientSecret":"SSO_CLIENT_SECRET"}` | Key inside `existingSecret` holding the client secret. |
 | storage | object | `{"backend":"local","s3":{"accessKey":"","bucket":"","endpoint":"","existingSecret":"","pathStyle":true,"region":"us-east-1","secretKey":"","secretKeys":{"accessKey":"S3_ACCESS_KEY","secretKey":"S3_SECRET_KEY"},"useSSL":true}}` | --------------------------------------------------------------------------- |
-| storage.backend | string | `"local"` | Note storage backend: `local` (notes on the `notes` PVC, byte-identical to upstream) or `s3` (S3-compatible object store, enables multi-replica sharing without RWX and self-service namespaces). |
+| storage.backend | string | `"local"` | Note storage backend: `local` (notes on the `notes` PVC, byte-identical to upstream) or `s3` (S3-compatible object store, enables multi-replica sharing without RWX). |
 | storage.s3.accessKey | string | `""` | Inline S3 access key (used only when `existingSecret` is empty). |
 | storage.s3.bucket | string | `""` | S3 bucket name. |
 | storage.s3.endpoint | string | `""` | S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`. |

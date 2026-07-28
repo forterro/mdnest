@@ -18,6 +18,7 @@ import (
 	"github.com/mdnest/mdnest/backend/handlers"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/sso"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 	"github.com/mdnest/mdnest/backend/updates"
 )
@@ -81,6 +82,23 @@ func main() {
 	}
 	if err := os.MkdirAll(absNotesDir, 0755); err != nil {
 		log.Fatalf("failed to create NOTES_DIR: %v", err)
+	}
+
+	// Storage backend for note data (local filesystem by default). Note
+	// history and git-sync always operate on the local filesystem regardless
+	// of this setting — they are orthogonal, optional features.
+	stg, err := storage.FromEnv(context.Background(), absNotesDir)
+	if err != nil {
+		log.Fatalf("failed to initialize storage backend: %v", err)
+	}
+	log.Printf("storage backend: %s", stg.Kind())
+
+	// Opt-in: auto-provision a per-user personal namespace on first load
+	// (off by default). Intended for object-store deployments where namespaces
+	// have no mount to come from. See MeHandler.ensurePersonalNamespace.
+	personalNsAutoprovision := env("PERSONAL_NAMESPACE_AUTOPROVISION", "false") == "true"
+	if personalNsAutoprovision {
+		log.Println("personal namespace auto-provisioning: enabled")
 	}
 
 	// Database setup (multi mode only)
@@ -308,16 +326,16 @@ func main() {
 		log.Println("live collaboration enabled (WebSocket)")
 	}
 
-	nsHandler := handlers.NewNamespaceHandler(absNotesDir, perms)
-	noteHandler := handlers.NewNoteHandler(absNotesDir)
+	nsHandler := handlers.NewNamespaceHandler(stg, perms)
+	noteHandler := handlers.NewNoteHandler(stg)
 	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
 		noteHandler.SetCollabHub(collabHub)
 	}
-	treeHandler := handlers.NewTreeHandler(absNotesDir, grantStore)
-	uploadHandler := handlers.NewUploadHandler(absNotesDir, perms)
-	moveHandler := handlers.NewMoveHandler(absNotesDir)
-	searchHandler := handlers.NewSearchHandler(absNotesDir)
+	treeHandler := handlers.NewTreeHandler(stg, grantStore)
+	uploadHandler := handlers.NewUploadHandler(stg, perms)
+	moveHandler := handlers.NewMoveHandler(stg)
+	searchHandler := handlers.NewSearchHandler(stg)
 	tokenHandler := handlers.NewTokenHandler(secretsDir)
 	// Comments require both a real user identity and the WebSocket hub for
 	// live refresh on other clients, so we gate on enableCollab (which
@@ -325,7 +343,7 @@ func main() {
 	// the route is never registered → clean 404 for any caller.
 	var commentsHandler *handlers.CommentsHandler
 	if enableCollab {
-		commentsHandler = handlers.NewCommentsHandler(absNotesDir)
+		commentsHandler = handlers.NewCommentsHandler(stg)
 	}
 
 	// Wrap mutating handlers to invalidate search cache + notify tree change
@@ -459,7 +477,7 @@ func main() {
 
 	// Apply permission checks in multi mode, passthrough in single mode
 	if perms != nil {
-		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
+		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.Handle)))
 		mux.Handle("/api/tree", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(treeHandler.GetTree))))
 		mux.Handle("/api/note", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(noteHandler.Handle)))))
 		// History endpoints — read-only, gate on read access (anyone who
@@ -475,7 +493,7 @@ func main() {
 		mux.Handle("/api/search", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(searchHandler.HandleSearch))))
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
-		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
+		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.Handle)))
 		mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
 		mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
 		// History endpoints work in single mode too — git-sync runs
@@ -493,7 +511,7 @@ func main() {
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
-		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore, stg, personalNsAutoprovision)
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
 		// Per-namespace scoping is done inside each handler so namespace
