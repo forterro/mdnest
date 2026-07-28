@@ -14,7 +14,7 @@ const testFrontend = "https://notes.example.com"
 func TestReturnOriginAllowed_EmptyAllowlist(t *testing.T) {
 	// No SSO_ALLOWED_RETURN_ORIGINS configured — the default for every existing
 	// install. Only the frontend origin may ever be the handoff target.
-	h := NewSSOHandler(nil, nil, "secret", testFrontend, false, nil)
+	h := NewSSOHandler(nil, nil, "secret", testFrontend, false, nil, false)
 
 	cases := []struct {
 		name   string
@@ -44,7 +44,7 @@ func TestReturnOriginAllowed_WithAllowlist(t *testing.T) {
 		"https://mcp.example.com/",
 		"   ",
 		"",
-	})
+	}, false)
 
 	cases := []struct {
 		name   string
@@ -71,7 +71,7 @@ func TestHandoffBase_EmptyAllowlist_AlwaysFrontend(t *testing.T) {
 	// This is the login-regression guard: with no allowlist configured, the
 	// post-login redirect base is the frontend for every input — the normal
 	// browser login (empty return origin) and any injected origin alike.
-	h := NewSSOHandler(nil, nil, "secret", testFrontend, false, nil)
+	h := NewSSOHandler(nil, nil, "secret", testFrontend, false, nil, false)
 
 	for _, origin := range []string{
 		"",                          // normal browser login
@@ -88,7 +88,7 @@ func TestHandoffBase_EmptyAllowlist_AlwaysFrontend(t *testing.T) {
 func TestHandoffBase_WithAllowlist(t *testing.T) {
 	h := NewSSOHandler(nil, nil, "secret", testFrontend, false, []string{
 		"https://mcp.example.com",
-	})
+	}, false)
 
 	cases := []struct {
 		name   string
