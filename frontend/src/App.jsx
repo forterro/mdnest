@@ -22,6 +22,7 @@ import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
+import TaskBoard from './components/TaskBoard.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
@@ -224,7 +225,7 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
-  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState(null);
   const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
@@ -1403,6 +1404,7 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
+          onOpenBoard={selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
             const next = !showComments;
@@ -1660,6 +1662,14 @@ function App() {
             setDismissedReleaseVer(v);
             setShowReleaseNotes(false);
           }}
+        />
+      )}
+      {showTaskBoard && selectedNs && (
+        <TaskBoard
+          ns={selectedNs}
+          canWrite={canWrite('')}
+          onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
+          onClose={() => setShowTaskBoard(false)}
         />
       )}
       {commentsEnabled && showComments && currentPath && (
