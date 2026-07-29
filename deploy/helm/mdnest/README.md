@@ -1,6 +1,6 @@
 # mdnest
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.12.0-forterro.1](https://img.shields.io/badge/AppVersion-3.12.0--forterro.1-informational?style=flat-square)
+![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.12.0-forterro.2](https://img.shields.io/badge/AppVersion-3.12.0--forterro.2-informational?style=flat-square)
 
 mdnest — self-hosted Markdown knowledge base with live collaboration.
 Standard-Kubernetes chart (no CRDs). PostgreSQL and Redis are expected to be
