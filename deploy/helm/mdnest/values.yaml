@@ -3,8 +3,9 @@
 # Deployment model
 # -----------------------------------------------------------------------------
 # By DEFAULT this chart deploys mdnest as a SINGLE instance (active/passive):
-#   * backend.replicaCount = 1, Recreate strategy
-#   * notes/secrets PVCs use ReadWriteOnce
+#   * backend is a StatefulSet, backend.replicaCount = 1
+#   * notes/secrets use per-pod volumeClaimTemplates (ReadWriteOnce), whose PVC
+#     lifecycle is owned by the StatefulSet (no orphaned, out-of-band PVC)
 #   * AUTH_MODE=single, live collaboration and Redis disabled
 # This matches mdnest's out-of-the-box behavior exactly.
 #
@@ -12,11 +13,13 @@
 #   1. Set auth.mode=multi and provide an external PostgreSQL (postgres.*).
 #   2. Enable collaboration: collab.enabled=true.
 #   3. Provide an external Redis and set collab.redis.url (or redis secret).
-#   4. Use ReadWriteMany storage for notes AND secrets so every replica shares
-#      the same files (persistence.notes.accessMode / persistence.secrets.accessMode).
+#   4. Provide SHARED storage via persistence.notes.existingClaim AND
+#      persistence.secrets.existingClaim (ReadWriteMany PVCs every replica
+#      mounts) so all pods share the same files. A per-pod volumeClaimTemplate
+#      would diverge, so the chart rejects multi-replica without a shared claim.
 #   5. Set backend.replicaCount > 1.
 # The chart validates these invariants and fails fast with a clear message if a
-# multi-replica deployment is missing Redis, collaboration, or RWX storage.
+# multi-replica deployment is missing Redis, collaboration, or a shared claim.
 # -----------------------------------------------------------------------------
 
 # -- Override the chart name portion of generated resource names.
@@ -65,9 +68,14 @@ image:
 backend:
   # -- Number of backend replicas. Keep at `1` unless running active/active (see top-of-file notes).
   replicaCount: 1
-  strategy:
-    # -- Deployment strategy. `Recreate` is required with ReadWriteOnce volumes; use `RollingUpdate` only with ReadWriteMany storage (active/active).
-    type: Recreate
+  # -- StatefulSet pod management. `Parallel` starts/replaces pods together
+  # (better for a stateless web tier); use `OrderedReady` for strict ordering.
+  podManagementPolicy: Parallel
+  updateStrategy:
+    # -- StatefulSet update strategy. `RollingUpdate` is safe because each pod
+    # owns its own volume (volumeClaimTemplate) — no ReadWriteOnce hand-off
+    # deadlock, so the old Deployment `Recreate` workaround is gone.
+    type: RollingUpdate
   # -- Public origin the browser uses to reach mdnest (CORS + SSO redirect URL). Set to your ingress URL in production.
   frontendOrigin: "http://localhost"
   # -- Optional display alias shown in the UI (`SERVER_ALIAS`).
@@ -294,7 +302,9 @@ sso:
 # rather than deploy that silently. Keys below are kept so the option can be
 # enabled in the same change that lands object-store support.
 storage:
-  # -- Note storage backend. Only `local` is implemented in this release (notes on the `notes` PVC); `s3` is rejected at install time.
+  # -- Note storage backend. `local` (notes on the volume) and `git` (same, plus
+  # mdnest maintains git history in-process — no git-sync sidecar needed for
+  # local history) are implemented; `s3` is rejected at install time.
   backend: local
   s3:
     # -- S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`.
@@ -317,38 +327,100 @@ storage:
     accessKey: ""
     # -- Inline S3 secret key (used only when `existingSecret` is empty).
     secretKey: ""
+  git:
+    # -- How often the git backend commits pending changes (Go duration, e.g.
+    # `10s`). Note bytes are durable on disk immediately; this only controls how
+    # often history is committed. Empty = backend default (10s).
+    commitInterval: ""
+    # -- Author name/email for mdnest's own commits. Empty = mdnest/mdnest@localhost.
+    authorName: ""
+    authorEmail: ""
+    # -- Optional per-namespace remote mirror: one git repository per workspace,
+    # pushed over HTTPS. When `url` is set the git backend pushes each namespace
+    # repo to `<url>/<namespace>.git`. Opt-in; empty = local history only. This
+    # is the coarse global default; per-workspace remotes (multi mode) are a
+    # separate feature.
+    remote:
+      # -- Base URL for the per-namespace remotes, e.g. `https://gitlab.forterro.com/mdnest-workspaces`. Empty = mirroring disabled.
+      url: ""
+      # -- HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`).
+      username: oauth2
+      # -- Branch to push.
+      branch: main
+      # -- Existing Secret holding the Personal Access Token, mounted read-only as a file. Create it yourself; tokens must never live in values.
+      existingTokenSecret: ""
+      # -- Key inside `existingTokenSecret` holding the PAT.
+      tokenSecretKey: token
 
 # -----------------------------------------------------------------------------
-# Persistence. notes = the Markdown repository (shared with git-sync); secrets =
-# API tokens / local secrets store. Both must be ReadWriteMany for active/active.
+# Persistence. The backend is a StatefulSet, so each volume has three modes:
+#   - existingClaim set  -> a shared PVC you provision (required for active/active
+#     and for git-sync, which both need all pods to see the same repository);
+#   - enabled, no existingClaim -> a per-pod volumeClaimTemplate the StatefulSet
+#     owns (clean PVC lifecycle, no orphan; the single-box default);
+#   - disabled -> an emptyDir (ephemeral).
+# notes = the Markdown repository (shared with git-sync); secrets = the local
+# API-token store (unused in multi mode, where tokens live in PostgreSQL).
 # -----------------------------------------------------------------------------
 persistence:
+  # -- Retention policy for volumeClaimTemplate PVCs (Kubernetes >= 1.27). Lets
+  # the StatefulSet delete or retain per-pod PVCs on scale-down/delete, so their
+  # lifecycle is controlled rather than orphaned. Leave empty for the cluster
+  # default (Retain). Example: {whenDeleted: Delete, whenScaled: Retain}.
+  pvcRetentionPolicy: {}
   notes:
     # -- Provision a PVC for note data (ignored when `storage.backend=s3`).
     enabled: true
-    # -- Use an existing PVC instead of creating one.
+    # -- Use an existing (shared) PVC instead of a per-pod volumeClaimTemplate.
+    # Required for active/active and for git-sync.
     existingClaim: ""
     # -- StorageClass for the notes PVC (empty = cluster default).
     storageClass: ""
-    # -- Access mode; must be `ReadWriteMany` for active/active.
+    # -- Access mode for the per-pod volumeClaimTemplate. ReadWriteOnce is fine
+    # (each pod owns its volume). Sharing across pods uses existingClaim instead.
     accessMode: ReadWriteOnce
     # -- Notes PVC size.
     size: 5Gi
     # -- Annotations for the notes PVC.
     annotations: {}
   secrets:
-    # -- Provision a PVC for the API-token/secrets store.
+    # -- Provision a PVC for the API-token/secrets store. In multi mode API
+    # tokens live in PostgreSQL, so this PVC is unused and can be disabled
+    # (falls back to an emptyDir) — that is what removes the last
+    # ReadWriteMany requirement for active/active. Existing multi-mode installs
+    # keep their tokens: on first start the backend imports tokens.json into
+    # Postgres, so upgrade with this still enabled once, then disable it.
+    # Single mode still uses it for the file-based token store.
     enabled: true
     # -- Use an existing PVC instead of creating one.
     existingClaim: ""
     # -- StorageClass for the secrets PVC (empty = cluster default).
     storageClass: ""
-    # -- Access mode; must be `ReadWriteMany` for active/active.
+    # -- Access mode. No longer required to be ReadWriteMany for active/active
+    # (multi-mode tokens are in Postgres); set persistence.secrets.enabled=false
+    # instead of provisioning RWX.
     accessMode: ReadWriteOnce
     # -- Secrets PVC size.
     size: 256Mi
     # -- Annotations for the secrets PVC.
     annotations: {}
+
+# -----------------------------------------------------------------------------
+# Durability writer (git-native HA only). Rendered when storage.backend=git and
+# the backend is scaled past one replica (or autoscaled): a single-replica
+# StatefulSet that owns the authoritative git tree, wins the Redis leader lock,
+# drains the durability queue, and mirrors to the remote. Its notes PVC reuses
+# persistence.notes (size/storageClass/accessMode); only sizing/scheduling here.
+# -----------------------------------------------------------------------------
+writer:
+  # -- Writer resource requests/limits.
+  resources: {}
+  # -- Node selector for the writer pod.
+  nodeSelector: {}
+  # -- Tolerations for the writer pod.
+  tolerations: []
+  # -- Affinity rules for the writer pod.
+  affinity: {}
 
 # -----------------------------------------------------------------------------
 # git-sync sidecar (optional). Periodically commits/pushes the notes repo to a
