@@ -25,9 +25,22 @@ import (
 //
 // The stored credential (PAT / SSH key) is never returned to a client; responses
 // only report has_credential so the UI can show "configured".
+// userLookup resolves a user's email, used to name their personal namespace.
+type userLookup interface {
+	GetUserByID(id int) (*store.User, error)
+}
+
+// grantWriter ensures a user has an access grant on their personal namespace so
+// the standard grant-based authorization covers it (no special-casing).
+type grantWriter interface {
+	GetGrantsForUser(userID int) ([]store.Grant, error)
+	CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*store.Grant, error)
+}
+
 type WorkspaceHandler struct {
-	store     store.WorkspaceStore
-	userStore store.UserStore
+	store  store.WorkspaceStore
+	users  userLookup
+	grants grantWriter
 	// stg materialises a namespace (MkdirAll) when a workspace is configured so
 	// it is listed and writable even before it holds a note. nil in single mode.
 	stg storage.Storage
@@ -39,14 +52,48 @@ type WorkspaceHandler struct {
 
 // NewWorkspaceHandler builds a workspace handler. stg may be nil (single mode);
 // allowedHosts may be nil.
-func NewWorkspaceHandler(ws store.WorkspaceStore, us store.UserStore, stg storage.Storage, allowedHosts []string) *WorkspaceHandler {
+func NewWorkspaceHandler(ws store.WorkspaceStore, users userLookup, grants grantWriter, stg storage.Storage, allowedHosts []string) *WorkspaceHandler {
 	lower := make([]string, 0, len(allowedHosts))
 	for _, h := range allowedHosts {
 		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
 			lower = append(lower, h)
 		}
 	}
-	return &WorkspaceHandler{store: ws, userStore: us, stg: stg, allowedHosts: lower}
+	return &WorkspaceHandler{store: ws, users: users, grants: grants, stg: stg, allowedHosts: lower}
+}
+
+// personalNamespace resolves the caller's personal-workspace namespace: their
+// email address, so it is recognisable (not an opaque user-<id>).
+func (h *WorkspaceHandler) personalNamespace(userID int) (string, error) {
+	if h.users == nil {
+		return "", errors.New("user lookup unavailable")
+	}
+	u, err := h.users.GetUserByID(userID)
+	if err != nil {
+		return "", err
+	}
+	if u == nil || strings.TrimSpace(u.Email) == "" {
+		return "", errors.New("user has no email")
+	}
+	return strings.TrimSpace(u.Email), nil
+}
+
+// ensurePersonalGrant gives the owner a write grant on their personal namespace
+// (idempotent) so the normal grant-based authorization lets them read/write it.
+func (h *WorkspaceHandler) ensurePersonalGrant(userID int, ns string) {
+	if h.grants == nil {
+		return
+	}
+	if grants, err := h.grants.GetGrantsForUser(userID); err == nil {
+		for _, g := range grants {
+			if g.Namespace == ns && g.Path == "/" {
+				return
+			}
+		}
+	}
+	if _, err := h.grants.CreateGrant(userID, ns, "/", "write", &userID); err != nil {
+		log.Printf("workspaces: could not grant %q to user %d: %v", ns, userID, err)
+	}
 }
 
 // ensureNamespace materialises a namespace so it is listed (and writable) even
@@ -399,10 +446,15 @@ func (h *WorkspaceHandler) mineGet(w http.ResponseWriter, userID int) {
 		return
 	}
 	if ws == nil {
-		// A user with no personal workspace yet gets the derived namespace so
-		// the UI can show where their notes would live once they attach a remote.
+		// No personal workspace yet: show the derived namespace (the caller's
+		// email) so the UI can indicate where their notes will live.
+		ns, err := h.personalNamespace(userID)
+		if err != nil {
+			wsError(w, http.StatusInternalServerError, "could not resolve your email")
+			return
+		}
 		wsJSON(w, http.StatusOK, map[string]any{
-			"namespace":      store.PersonalNamespace(userID),
+			"namespace":      ns,
 			"is_personal":    true,
 			"git_enabled":    false,
 			"has_credential": false,
@@ -424,10 +476,15 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 		wsError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// A personal workspace is always owned by the caller and named from their
-	// id — never taken from the request, so a user can't target another
+	// A personal workspace is always owned by the caller and named after their
+	// email — never taken from the request, so a user can't target another
 	// namespace.
-	in.Namespace = store.PersonalNamespace(userID)
+	ns, err := h.personalNamespace(userID)
+	if err != nil {
+		wsError(w, http.StatusInternalServerError, "could not resolve your email")
+		return
+	}
+	in.Namespace = ns
 	in.OwnerID = &userID
 	in.IsPersonal = true
 
@@ -435,6 +492,12 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "lookup failed")
 		return
+	}
+	// If the naming scheme changed (an older user-<id> row), replace it so the
+	// personal workspace is keyed by the email going forward.
+	if existing != nil && existing.Namespace != ns {
+		_, _ = h.store.Delete(existing.ID)
+		existing = nil
 	}
 	var ws *store.Workspace
 	if existing == nil {
@@ -446,7 +509,8 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 		wsError(w, http.StatusInternalServerError, "failed to save workspace")
 		return
 	}
-	h.ensureNamespace(r.Context(), in.Namespace)
+	h.ensureNamespace(r.Context(), ns)
+	h.ensurePersonalGrant(userID, ns)
 	wsJSON(w, http.StatusOK, ws)
 }
 

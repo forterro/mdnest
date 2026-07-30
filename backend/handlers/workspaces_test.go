@@ -70,11 +70,29 @@ func mineReq(userID int, body string) *http.Request {
 	return middleware.WithUser(r, &middleware.UserContext{ID: userID, Username: "u", Role: "collaborator"})
 }
 
+type fakeUsers struct{ email string }
+
+func (f fakeUsers) GetUserByID(id int) (*store.User, error) {
+	return &store.User{ID: id, Email: f.email}, nil
+}
+
+type fakeGrants struct {
+	created bool
+	ns      string
+}
+
+func (f *fakeGrants) GetGrantsForUser(int) ([]store.Grant, error) { return nil, nil }
+func (f *fakeGrants) CreateGrant(userID int, ns, path, perm string, by *int) (*store.Grant, error) {
+	f.created = true
+	f.ns = ns
+	return &store.Grant{}, nil
+}
+
 // A personal-workspace PUT ignores a client-supplied namespace and always
 // stores the caller's derived namespace, owned by the caller, is_personal.
 func TestMinePutForcesOwnerAndDerivedNamespace(t *testing.T) {
 	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, fakeUsers{email: "me@forterro.com"}, &fakeGrants{}, nil, nil)
 
 	body := `{"namespace":"someone-elses","git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/me/notes.git","credential":"glpat-x"}`
 	w := httptest.NewRecorder()
@@ -86,8 +104,8 @@ func TestMinePutForcesOwnerAndDerivedNamespace(t *testing.T) {
 	if !fs.created {
 		t.Fatal("expected a create")
 	}
-	if fs.lastCreate.Namespace != "user-7" {
-		t.Fatalf("namespace = %q, want user-7 (client value must be ignored)", fs.lastCreate.Namespace)
+	if fs.lastCreate.Namespace != "me@forterro.com" {
+		t.Fatalf("namespace = %q, want the caller's email (client value ignored)", fs.lastCreate.Namespace)
 	}
 	if !fs.lastCreate.IsPersonal || fs.lastCreate.OwnerID == nil || *fs.lastCreate.OwnerID != 7 {
 		t.Fatalf("owner/personal not enforced: %+v", fs.lastCreate)
@@ -97,7 +115,7 @@ func TestMinePutForcesOwnerAndDerivedNamespace(t *testing.T) {
 // git_enabled with a bad remote is rejected before any store write.
 func TestMinePutRejectsBadRemote(t *testing.T) {
 	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
 	body := `{"git_enabled":true,"transport":"https","remote_url":"http://insecure.example/x.git"}`
 	w := httptest.NewRecorder()
 	h.HandleMine(w, mineReq(7, body))
@@ -111,7 +129,7 @@ func TestMinePutRejectsBadRemote(t *testing.T) {
 
 func TestAdminCreateRejectsReservedPrefix(t *testing.T) {
 	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
 	body := `{"namespace":"user-1","git_enabled":false}`
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(body))
 	w := httptest.NewRecorder()
@@ -122,7 +140,7 @@ func TestAdminCreateRejectsReservedPrefix(t *testing.T) {
 }
 
 func TestValidateRemote(t *testing.T) {
-	h := NewWorkspaceHandler(nil, nil, nil, []string{"gitlab.forterro.com"})
+	h := NewWorkspaceHandler(nil, nil, nil, nil, []string{"gitlab.forterro.com"})
 	cases := []struct {
 		transport, url string
 		ok             bool
@@ -144,7 +162,7 @@ func TestValidateRemote(t *testing.T) {
 }
 
 func TestHandleMineMethodNotAllowed(t *testing.T) {
-	h := NewWorkspaceHandler(&fakeWSStore{}, nil, nil, nil)
+	h := NewWorkspaceHandler(&fakeWSStore{}, nil, nil, nil, nil)
 	r := httptest.NewRequest(http.MethodPatch, "/api/me/workspace", nil)
 	r = middleware.WithUser(r, &middleware.UserContext{ID: 1, Role: "collaborator"})
 	w := httptest.NewRecorder()
@@ -155,7 +173,7 @@ func TestHandleMineMethodNotAllowed(t *testing.T) {
 }
 
 func TestMineGetDefaultWhenNone(t *testing.T) {
-	h := NewWorkspaceHandler(&fakeWSStore{personal: map[int]*store.Workspace{}}, nil, nil, nil)
+	h := NewWorkspaceHandler(&fakeWSStore{personal: map[int]*store.Workspace{}}, fakeUsers{email: "u5@forterro.com"}, &fakeGrants{}, nil, nil)
 	r := httptest.NewRequest(http.MethodGet, "/api/me/workspace", nil)
 	r = middleware.WithUser(r, &middleware.UserContext{ID: 5, Role: "collaborator"})
 	w := httptest.NewRecorder()
@@ -165,7 +183,7 @@ func TestMineGetDefaultWhenNone(t *testing.T) {
 	}
 	var got map[string]any
 	json.Unmarshal(w.Body.Bytes(), &got)
-	if got["namespace"] != "user-5" || got["configured"] != false {
+	if got["namespace"] != "u5@forterro.com" || got["configured"] != false {
 		t.Fatalf("unexpected default: %v", got)
 	}
 }
@@ -173,7 +191,7 @@ func TestMineGetDefaultWhenNone(t *testing.T) {
 // Creating a workspace with a group_id routes to CreateInGroup with the namespace.
 func TestAdminCreateInGroup(t *testing.T) {
 	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}, groups: map[int]*store.WorkspaceGroup{7: {ID: 7, Name: "dev", BaseURL: "https://gitlab.forterro.com/mdnest-workspaces/dev"}}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(`{"namespace":"team-a","group_id":7}`))
 	w := httptest.NewRecorder()
 	h.HandleAdmin(w, r)
@@ -191,7 +209,7 @@ func TestAdminCreateInGroup(t *testing.T) {
 // Creating in a nonexistent group is rejected before any write.
 func TestAdminCreateInMissingGroup(t *testing.T) {
 	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}, groups: map[int]*store.WorkspaceGroup{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(`{"namespace":"team-b","group_id":99}`))
 	w := httptest.NewRecorder()
 	h.HandleAdmin(w, r)
@@ -205,7 +223,7 @@ func TestAdminCreateInMissingGroup(t *testing.T) {
 
 // A group POST validates the base URL against the allow-list.
 func TestGroupCreateValidatesBaseURL(t *testing.T) {
-	h := NewWorkspaceHandler(&fakeWSStore{groups: map[int]*store.WorkspaceGroup{}}, nil, nil, []string{"gitlab.forterro.com"})
+	h := NewWorkspaceHandler(&fakeWSStore{groups: map[int]*store.WorkspaceGroup{}}, nil, nil, nil, []string{"gitlab.forterro.com"})
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspace-groups", strings.NewReader(`{"name":"dev","transport":"https","base_url":"https://evil.example.com/g"}`))
 	w := httptest.NewRecorder()
 	h.HandleGroups(w, r)
