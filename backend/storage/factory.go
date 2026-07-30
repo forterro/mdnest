@@ -62,6 +62,7 @@ func fromEnvSingle(ctx context.Context, localRoot string, resolver RemoteResolve
 			if err != nil {
 				return nil, fmt.Errorf("storage: REDIS_URL is set but the working set is unavailable: %w", err)
 			}
+			gs.SetReconciler(makeReflector(gs, ws, workingSetCap()))
 			return newCoherentStorage(gs, ws, workingSetCap()), nil
 		}
 		return gs, nil
@@ -115,6 +116,7 @@ func newWriterStorage(ctx context.Context, localRoot string, resolver RemoteReso
 		return nil, err
 	}
 	w := NewWriter(gs, ws, queue, leader, workingSetCap())
+	gs.SetReconciler(makeReflector(gs, ws, workingSetCap()))
 	go func() {
 		if err := w.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("storage: durability writer stopped: %v", err)
@@ -135,6 +137,7 @@ func newGitStorageFromEnv(localRoot string, resolver RemoteResolver) (*GitStorag
 	}
 	committer := NewIntervalCommitter(localRoot, debounce, maxWait, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
 	committer.resolver = resolver
+	committer.syncInterval.Store(int64(durationEnv("GIT_SYNC_INTERVAL", time.Minute)))
 	return NewGitStorage(localRoot, committer)
 }
 
