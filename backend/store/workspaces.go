@@ -33,6 +33,8 @@ type Workspace struct {
 	Branch        string    `json:"branch"`
 	KnownHosts    string    `json:"known_hosts,omitempty"` // SSH host keys (public), not a secret
 	HasCredential bool      `json:"has_credential"`
+	GroupID       *int      `json:"group_id,omitempty"`   // set when the workspace belongs to a group
+	GroupName     string    `json:"group_name,omitempty"` // resolved via join, for admin UIs
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
@@ -81,6 +83,19 @@ type WorkspaceStore interface {
 	// RemoteForNamespace returns the decrypted, git-enabled remote for a
 	// namespace, or (nil, nil) when the namespace has no configured override.
 	RemoteForNamespace(ns string) (*WorkspaceRemote, error)
+
+	// --- workspace groups: a shared git remote base (one repo per namespace),
+	// the DB/UI equivalent of the GIT_REMOTE_URL env provisioning. Workspaces
+	// created in a group inherit its transport/base/credentials; their per-ns
+	// remote is <base>/<namespace>.git.
+	ListGroups() ([]WorkspaceGroup, error)
+	GetGroup(id int) (*WorkspaceGroup, error)
+	GetGroupByName(name string) (*WorkspaceGroup, error)
+	CreateGroup(in WorkspaceGroupInput) (*WorkspaceGroup, error)
+	UpdateGroup(id int, in WorkspaceGroupInput) (*WorkspaceGroup, error)
+	DeleteGroup(id int) (bool, error)
+	// CreateInGroup adds a namespace to a group; it inherits the group's remote.
+	CreateInGroup(groupID int, namespace string, gitEnabled bool) (*Workspace, error)
 }
 
 // PostgresWorkspaceStore is the Postgres-backed WorkspaceStore.
@@ -99,9 +114,11 @@ const workspaceSelect = `
 	SELECT w.id, w.namespace, w.owner_id, COALESCE(u.email, ''), w.is_personal,
 	       w.git_enabled, w.transport, w.remote_url, w.username, w.branch,
 	       w.known_hosts, (w.credential_encrypted <> '') AS has_credential,
+	       w.group_id, COALESCE(g.name, ''),
 	       w.created_at, w.updated_at
 	FROM workspaces w
-	LEFT JOIN users u ON u.id = w.owner_id`
+	LEFT JOIN users u ON u.id = w.owner_id
+	LEFT JOIN workspace_groups g ON g.id = w.group_id`
 
 func (s *PostgresWorkspaceStore) List() ([]Workspace, error) {
 	rows, err := s.db.Query(workspaceSelect + ` ORDER BY w.namespace`)
@@ -218,20 +235,50 @@ func (s *PostgresWorkspaceStore) Delete(id int) (bool, error) {
 
 func (s *PostgresWorkspaceStore) RemoteForNamespace(ns string) (*WorkspaceRemote, error) {
 	var (
-		r   WorkspaceRemote
-		enc string
+		r           WorkspaceRemote
+		enc         string
+		gitEnabled  bool
+		groupID     sql.NullInt64
+		gTransport  sql.NullString
+		gBaseURL    sql.NullString
+		gUsername   sql.NullString
+		gBranch     sql.NullString
+		gKnownHosts sql.NullString
+		gEnc        sql.NullString
 	)
 	r.Namespace = ns
 	err := s.db.QueryRow(
-		`SELECT transport, remote_url, username, branch, known_hosts, credential_encrypted
-		 FROM workspaces
-		 WHERE namespace = $1 AND git_enabled AND remote_url <> ''`, ns,
-	).Scan(&r.Transport, &r.RemoteURL, &r.Username, &r.Branch, &r.KnownHosts, &enc)
+		`SELECT w.git_enabled, w.group_id, w.transport, w.remote_url, w.username,
+		        w.branch, w.known_hosts, w.credential_encrypted,
+		        g.transport, g.base_url, g.username, g.branch, g.known_hosts,
+		        g.credential_encrypted
+		 FROM workspaces w
+		 LEFT JOIN workspace_groups g ON g.id = w.group_id
+		 WHERE w.namespace = $1`, ns,
+	).Scan(&gitEnabled, &groupID, &r.Transport, &r.RemoteURL, &r.Username,
+		&r.Branch, &r.KnownHosts, &enc,
+		&gTransport, &gBaseURL, &gUsername, &gBranch, &gKnownHosts, &gEnc)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if !gitEnabled {
+		return nil, nil
+	}
+	if groupID.Valid {
+		// Grouped workspace: inherit the group's transport/credential; the
+		// per-namespace repo is <base>/<namespace>.git.
+		r.Transport = gTransport.String
+		r.RemoteURL = groupRepoURL(gBaseURL.String, ns)
+		r.Username = gUsername.String
+		r.Branch = gBranch.String
+		r.KnownHosts = gKnownHosts.String
+		enc = gEnc.String
+	} else if r.RemoteURL == "" {
+		// Standalone workspace with no remote configured.
+		return nil, nil
 	}
 	if enc != "" {
 		cred, err := secrets.Decrypt(enc, s.key)
@@ -241,6 +288,13 @@ func (s *PostgresWorkspaceStore) RemoteForNamespace(ns string) (*WorkspaceRemote
 		r.Credential = string(cred)
 	}
 	return &r, nil
+}
+
+// groupRepoURL derives a namespace's repository URL from a group's base:
+// <base>/<namespace>.git. The string join works for both HTTPS URLs and
+// scp-like SSH bases (git@host:group -> git@host:group/<ns>.git).
+func groupRepoURL(base, ns string) string {
+	return strings.TrimRight(strings.TrimSpace(base), "/") + "/" + ns + ".git"
 }
 
 // normalizeInput applies the column defaults so callers may leave transport /
@@ -263,16 +317,22 @@ func normalizeInput(in WorkspaceInput) WorkspaceInput {
 func scanWorkspace(row rowScanner) (Workspace, error) {
 	var w Workspace
 	var ownerID sql.NullInt64
+	var groupID sql.NullInt64
 	if err := row.Scan(
 		&w.ID, &w.Namespace, &ownerID, &w.OwnerEmail, &w.IsPersonal,
 		&w.GitEnabled, &w.Transport, &w.RemoteURL, &w.Username, &w.Branch,
-		&w.KnownHosts, &w.HasCredential, &w.CreatedAt, &w.UpdatedAt,
+		&w.KnownHosts, &w.HasCredential, &groupID, &w.GroupName,
+		&w.CreatedAt, &w.UpdatedAt,
 	); err != nil {
 		return Workspace{}, err
 	}
 	if ownerID.Valid {
 		id := int(ownerID.Int64)
 		w.OwnerID = &id
+	}
+	if groupID.Valid {
+		id := int(groupID.Int64)
+		w.GroupID = &id
 	}
 	return w, nil
 }

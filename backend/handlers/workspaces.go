@@ -47,7 +47,8 @@ func NewWorkspaceHandler(ws store.WorkspaceStore, us store.UserStore, allowedHos
 var namespacePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 type workspaceRequest struct {
-	Namespace  string `json:"namespace"` // admin create only
+	Namespace  string `json:"namespace"`          // admin create only
+	GroupID    *int   `json:"group_id,omitempty"` // admin create only: add to a group
 	GitEnabled bool   `json:"git_enabled"`
 	Transport  string `json:"transport"`
 	RemoteURL  string `json:"remote_url"`
@@ -105,6 +106,26 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusConflict, "a workspace already exists for this namespace")
 		return
 	}
+	// Grouped create: the namespace inherits the group's remote/credential, so
+	// only the namespace is needed (its repo is <group base>/<namespace>.git).
+	if req.GroupID != nil {
+		grp, err := h.store.GetGroup(*req.GroupID)
+		if err != nil {
+			wsError(w, http.StatusInternalServerError, "group lookup failed")
+			return
+		}
+		if grp == nil {
+			wsError(w, http.StatusBadRequest, "group not found")
+			return
+		}
+		ws, err := h.store.CreateInGroup(*req.GroupID, ns, true)
+		if err != nil {
+			wsError(w, http.StatusInternalServerError, "failed to create workspace in group")
+			return
+		}
+		wsJSON(w, http.StatusCreated, ws)
+		return
+	}
 	in, err := h.inputFrom(req, req.GitEnabled)
 	if err != nil {
 		wsError(w, http.StatusBadRequest, err.Error())
@@ -144,10 +165,17 @@ func (h *WorkspaceHandler) adminUpdate(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	in, err := h.inputFrom(req, req.GitEnabled)
-	if err != nil {
-		wsError(w, http.StatusBadRequest, err.Error())
-		return
+	// A grouped workspace inherits the group's remote, so an admin can only
+	// toggle it on/off here; a standalone one takes the full config.
+	var in store.WorkspaceInput
+	if existing.GroupID != nil {
+		in = store.WorkspaceInput{GitEnabled: req.GitEnabled}
+	} else {
+		var err error
+		if in, err = h.inputFrom(req, req.GitEnabled); err != nil {
+			wsError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	ws, err := h.store.Update(id, in)
 	if err != nil {
@@ -177,6 +205,150 @@ func (h *WorkspaceHandler) adminDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// --- workspace groups: /api/admin/workspace-groups (superadmin) ------------
+
+// groupNamePattern bounds a group's display name to a safe, readable charset.
+var groupNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
+
+type groupRequest struct {
+	Name       string  `json:"name"`
+	Transport  string  `json:"transport"`
+	BaseURL    string  `json:"base_url"`
+	Username   string  `json:"username"`
+	Branch     string  `json:"branch"`
+	KnownHosts string  `json:"known_hosts"`
+	Credential *string `json:"credential"`
+}
+
+func (h *WorkspaceHandler) HandleGroups(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.groupsList(w)
+	case http.MethodPost:
+		h.groupsCreate(w, r)
+	case http.MethodPut:
+		h.groupsUpdate(w, r)
+	case http.MethodDelete:
+		h.groupsDelete(w, r)
+	default:
+		wsError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h *WorkspaceHandler) groupsList(w http.ResponseWriter) {
+	list, err := h.store.ListGroups()
+	if err != nil {
+		wsError(w, http.StatusInternalServerError, "failed to list groups")
+		return
+	}
+	wsJSON(w, http.StatusOK, list)
+}
+
+func (h *WorkspaceHandler) groupsCreate(w http.ResponseWriter, r *http.Request) {
+	var req groupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		wsError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if !groupNamePattern.MatchString(name) {
+		wsError(w, http.StatusBadRequest, "invalid group name")
+		return
+	}
+	if existing, _ := h.store.GetGroupByName(name); existing != nil {
+		wsError(w, http.StatusConflict, "a group with this name already exists")
+		return
+	}
+	in, err := h.groupInputFrom(req)
+	if err != nil {
+		wsError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	in.Name = name
+	g, err := h.store.CreateGroup(in)
+	if err != nil {
+		wsError(w, http.StatusInternalServerError, "failed to create group")
+		return
+	}
+	wsJSON(w, http.StatusCreated, g)
+}
+
+func (h *WorkspaceHandler) groupsUpdate(w http.ResponseWriter, r *http.Request) {
+	id, ok := workspaceID(w, r)
+	if !ok {
+		return
+	}
+	existing, err := h.store.GetGroup(id)
+	if err != nil {
+		wsError(w, http.StatusInternalServerError, "lookup failed")
+		return
+	}
+	if existing == nil {
+		wsError(w, http.StatusNotFound, "group not found")
+		return
+	}
+	var req groupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		wsError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if !groupNamePattern.MatchString(name) {
+		wsError(w, http.StatusBadRequest, "invalid group name")
+		return
+	}
+	in, err := h.groupInputFrom(req)
+	if err != nil {
+		wsError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	in.Name = name
+	g, err := h.store.UpdateGroup(id, in)
+	if err != nil {
+		wsError(w, http.StatusInternalServerError, "failed to update group")
+		return
+	}
+	wsJSON(w, http.StatusOK, g)
+}
+
+func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) {
+	id, ok := workspaceID(w, r)
+	if !ok {
+		return
+	}
+	deleted, err := h.store.DeleteGroup(id)
+	if err != nil {
+		wsError(w, http.StatusInternalServerError, "failed to delete group")
+		return
+	}
+	if !deleted {
+		wsError(w, http.StatusNotFound, "group not found")
+		return
+	}
+	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// groupInputFrom validates and builds a group input. The base URL is validated
+// like a workspace remote (scheme/host + optional allow-list).
+func (h *WorkspaceHandler) groupInputFrom(req groupRequest) (store.WorkspaceGroupInput, error) {
+	transport := strings.ToLower(strings.TrimSpace(req.Transport))
+	if transport != "ssh" {
+		transport = "https"
+	}
+	baseURL := strings.TrimSpace(req.BaseURL)
+	if err := h.validateRemote(transport, baseURL); err != nil {
+		return store.WorkspaceGroupInput{}, err
+	}
+	return store.WorkspaceGroupInput{
+		Transport:  transport,
+		BaseURL:    baseURL,
+		Username:   strings.TrimSpace(req.Username),
+		Branch:     strings.TrimSpace(req.Branch),
+		KnownHosts: req.KnownHosts,
+		Credential: req.Credential,
+	}, nil
 }
 
 // --- personal workspace: /api/me/workspace (any authenticated user) --------

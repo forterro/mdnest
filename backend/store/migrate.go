@@ -164,6 +164,32 @@ var migrations = []struct {
 				ON workspaces(owner_id) WHERE is_personal;
 		`,
 	},
+	{
+		// Workspace groups: a shared git remote base (the DB/UI equivalent of the
+		// GIT_REMOTE_URL env provisioning). Workspaces created in a group inherit
+		// its transport/base/credential and mirror to <base_url>/<namespace>.git,
+		// so an operator declares the base + token once and adds namespaces to it.
+		// workspaces.group_id links a namespace to its group; ON DELETE CASCADE so
+		// removing a group removes its members' mirror config (never the notes).
+		name: "010_create_workspace_groups",
+		sql: `
+			CREATE TABLE IF NOT EXISTS workspace_groups (
+				id                   SERIAL PRIMARY KEY,
+				name                 TEXT NOT NULL UNIQUE,
+				transport            TEXT NOT NULL DEFAULT 'https',
+				base_url             TEXT NOT NULL,
+				username             TEXT NOT NULL DEFAULT 'oauth2',
+				branch               TEXT NOT NULL DEFAULT 'main',
+				known_hosts          TEXT NOT NULL DEFAULT '',
+				credential_encrypted TEXT NOT NULL DEFAULT '',
+				created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+			ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS group_id INTEGER
+				REFERENCES workspace_groups(id) ON DELETE CASCADE;
+			CREATE INDEX IF NOT EXISTS idx_workspaces_group_id ON workspaces(group_id);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

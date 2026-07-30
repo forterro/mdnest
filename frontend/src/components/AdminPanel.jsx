@@ -15,6 +15,10 @@ import {
   adminListWorkspaces,
   adminSaveWorkspace,
   adminDeleteWorkspace,
+  adminListWorkspaceGroups,
+  adminSaveWorkspaceGroup,
+  adminDeleteWorkspaceGroup,
+  adminCreateWorkspaceInGroup,
   getManageableNamespaces,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
@@ -702,12 +706,18 @@ function WorkspacesTab() {
   return (
     <div className="admin-tab-content">
       <p className="admin-description">
-        Per-namespace git remotes. A shared workspace mirrors a team namespace to
-        one repository; the credential is stored encrypted and never shown again.
-        Personal workspaces are managed by each user under Settings → Git remote.
+        Per-namespace git remotes. Use a <strong>group</strong> to declare a
+        shared remote base + token once and add namespaces to it (one repo per
+        namespace, like the env provisioning), or a <strong>standalone</strong>
+        workspace to mirror a single namespace to one specific repository.
+        Credentials are stored encrypted and never shown again. Personal
+        workspaces are managed by each user under Settings → Git remote.
       </p>
       {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
 
+      <GroupsSection onWorkspacesChanged={load} />
+
+      <h4 style={{ margin: '1.4rem 0 0.2rem' }}>Standalone workspaces</h4>
       <div className="admin-form" style={{ display: 'grid', gap: '0.4rem', maxWidth: 620 }}>
         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{editId ? `Edit "${form.namespace}"` : 'Add a shared workspace'}</div>
         {!editId && (
@@ -752,14 +762,17 @@ function WorkspacesTab() {
             <tbody>
               {list.map((w) => (
                 <tr key={w.id}>
-                  <td>{w.namespace}{w.is_personal && <span className="admin-scope-badge" style={{ marginLeft: 6 }}>personal</span>}</td>
+                  <td>{w.namespace}
+                    {w.is_personal && <span className="admin-scope-badge" style={{ marginLeft: 6 }}>personal</span>}
+                    {w.group_name && <span className="admin-scope-badge" style={{ marginLeft: 6 }}>group: {w.group_name}</span>}
+                  </td>
                   <td>{w.transport}</td>
-                  <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.remote_url}>{w.remote_url}</td>
+                  <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.remote_url}>{w.group_id ? <em style={{ color: '#a6adc8' }}>via group</em> : w.remote_url}</td>
                   <td>{w.branch}</td>
                   <td>{w.has_credential ? 'yes' : '-'}</td>
                   <td>{w.git_enabled ? 'yes' : '-'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {!w.is_personal && <button className="modal-btn" onClick={() => edit(w)}>Edit</button>}
+                    {!w.is_personal && !w.group_id && <button className="modal-btn" onClick={() => edit(w)}>Edit</button>}
                     {!w.is_personal && <button className="token-revoke" onClick={() => del(w)}>Delete</button>}
                   </td>
                 </tr>
@@ -767,6 +780,109 @@ function WorkspacesTab() {
             </tbody>
           </table>
         )}
+      </div>
+    </div>
+  );
+}
+
+// GroupsSection: superadmin CRUD over workspace groups (a shared remote base +
+// token) with a per-group "+ New workspace" action that adds a namespace which
+// inherits the group's remote (repo = <base>/<namespace>.git).
+function GroupsSection({ onWorkspacesChanged }) {
+  const empty = { name: '', transport: 'https', base_url: '', username: 'oauth2', branch: 'main', known_hosts: '', credential: '' };
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(empty);
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState('');
+  const [newNs, setNewNs] = useState({});
+
+  const load = useCallback(async () => {
+    try { setGroups(await adminListWorkspaceGroups() || []); }
+    catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const reset = () => { setForm(empty); setEditId(null); setErr(''); };
+  const edit = (g) => {
+    setEditId(g.id); setErr('');
+    setForm({ name: g.name, transport: g.transport, base_url: g.base_url, username: g.username, branch: g.branch, known_hosts: g.known_hosts || '', credential: '' });
+  };
+
+  const save = async () => {
+    setErr('');
+    try {
+      const payload = { name: form.name.trim(), transport: form.transport, base_url: form.base_url.trim(), username: form.username.trim(), branch: form.branch.trim(), known_hosts: form.known_hosts };
+      if (form.credential) payload.credential = form.credential;
+      await adminSaveWorkspaceGroup(payload, editId || undefined);
+      reset(); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  const del = async (g) => {
+    if (!confirm(`Delete group "${g.name}"? Its ${g.workspace_count} workspace(s) mirror config is removed (notes stay).`)) return;
+    try { await adminDeleteWorkspaceGroup(g.id); if (editId === g.id) reset(); load(); onWorkspacesChanged && onWorkspacesChanged(); }
+    catch (e) { setErr(e.message); }
+  };
+
+  const addWs = async (g) => {
+    const ns = (newNs[g.id] || '').trim();
+    if (!ns) return;
+    setErr('');
+    try {
+      await adminCreateWorkspaceInGroup(ns, g.id);
+      setNewNs((m) => ({ ...m, [g.id]: '' }));
+      load(); onWorkspacesChanged && onWorkspacesChanged();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h4 style={{ margin: '0.2rem 0' }}>Groups</h4>
+      {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.4rem' }}>{err}</div>}
+
+      <div className="admin-form" style={{ display: 'grid', gap: '0.4rem', maxWidth: 620 }}>
+        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{editId ? `Edit group "${form.name}"` : 'Add a group'}</div>
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          <input className="modal-input" placeholder="group name (e.g. Team workspaces)" value={form.name} onChange={set('name')} style={{ flex: 1 }} />
+          <select className="modal-input" value={form.transport} onChange={set('transport')} style={{ maxWidth: 140 }}>
+            <option value="https">HTTPS</option><option value="ssh">SSH</option>
+          </select>
+        </div>
+        <input className="modal-input" placeholder={form.transport === 'ssh' ? 'base: git@host:group' : 'base: https://host/group'} value={form.base_url} onChange={set('base_url')} />
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          {form.transport === 'https' && <input className="modal-input" placeholder="username (oauth2)" value={form.username} onChange={set('username')} style={{ maxWidth: 200 }} />}
+          <input className="modal-input" placeholder="branch (main)" value={form.branch} onChange={set('branch')} style={{ maxWidth: 160 }} />
+        </div>
+        {form.transport === 'ssh' && <textarea className="modal-input" rows={2} placeholder="known_hosts line (host ssh-ed25519 AAAA...)" value={form.known_hosts} onChange={set('known_hosts')} />}
+        <input className="modal-input" type="password" placeholder={form.transport === 'ssh' ? 'shared private key (blank = keep)' : 'shared PAT / deploy token (blank = keep)'} value={form.credential} onChange={set('credential')} />
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          <button className="modal-btn-primary" onClick={save}>{editId ? 'Save' : 'Add group'}</button>
+          {editId && <button className="modal-btn" onClick={reset}>Cancel</button>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: '0.8rem' }}>
+        {loading ? <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
+          : groups.length === 0 ? <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No groups yet.</p>
+          : groups.map((g) => (
+            <div key={g.id} style={{ border: '1px solid #313244', borderRadius: 6, padding: '0.5rem 0.6rem', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <strong>{g.name}</strong>
+                <span style={{ fontSize: '0.8rem', color: '#a6adc8' }}>{g.transport} · {g.base_url} · {g.branch} · cred {g.has_credential ? 'yes' : 'no'} · {g.workspace_count} ws</span>
+                <span style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                  <button className="modal-btn" onClick={() => edit(g)}>Edit</button>
+                  <button className="token-revoke" onClick={() => del(g)}>Delete</button>
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+                <input className="modal-input" placeholder="new namespace in this group" value={newNs[g.id] || ''} onChange={(e) => setNewNs((m) => ({ ...m, [g.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') addWs(g); }} style={{ flex: 1 }} />
+                <button className="modal-btn-primary" onClick={() => addWs(g)}>+ New workspace</button>
+              </div>
+            </div>
+          ))}
       </div>
     </div>
   );
