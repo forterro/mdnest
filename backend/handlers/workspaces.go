@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -12,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -25,21 +28,37 @@ import (
 type WorkspaceHandler struct {
 	store     store.WorkspaceStore
 	userStore store.UserStore
+	// stg materialises a namespace (MkdirAll) when a workspace is configured so
+	// it is listed and writable even before it holds a note. nil in single mode.
+	stg storage.Storage
 	// allowedHosts, when non-empty, restricts remote URLs to these hosts
 	// (defence-in-depth against SSRF; the primary control is the writer's
 	// egress NetworkPolicy). Empty = any host allowed.
 	allowedHosts []string
 }
 
-// NewWorkspaceHandler builds a workspace handler. allowedHosts may be nil.
-func NewWorkspaceHandler(ws store.WorkspaceStore, us store.UserStore, allowedHosts []string) *WorkspaceHandler {
+// NewWorkspaceHandler builds a workspace handler. stg may be nil (single mode);
+// allowedHosts may be nil.
+func NewWorkspaceHandler(ws store.WorkspaceStore, us store.UserStore, stg storage.Storage, allowedHosts []string) *WorkspaceHandler {
 	lower := make([]string, 0, len(allowedHosts))
 	for _, h := range allowedHosts {
 		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
 			lower = append(lower, h)
 		}
 	}
-	return &WorkspaceHandler{store: ws, userStore: us, allowedHosts: lower}
+	return &WorkspaceHandler{store: ws, userStore: us, stg: stg, allowedHosts: lower}
+}
+
+// ensureNamespace materialises a namespace so it is listed (and writable) even
+// before it holds a note — MkdirAll registers it in the working set. Best
+// effort: a failure is logged, not fatal (the git config is already saved).
+func (h *WorkspaceHandler) ensureNamespace(ctx context.Context, ns string) {
+	if h.stg == nil || ns == "" {
+		return
+	}
+	if err := h.stg.MkdirAll(ctx, ns, ""); err != nil {
+		log.Printf("workspaces: could not create namespace %q: %v", ns, err)
+	}
 }
 
 // namespacePattern bounds admin-supplied namespace names to a safe charset (no
@@ -123,6 +142,7 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 			wsError(w, http.StatusInternalServerError, "failed to create workspace in group")
 			return
 		}
+		h.ensureNamespace(r.Context(), ns)
 		wsJSON(w, http.StatusCreated, ws)
 		return
 	}
@@ -139,6 +159,7 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
+	h.ensureNamespace(r.Context(), ns)
 	wsJSON(w, http.StatusCreated, ws)
 }
 
@@ -425,6 +446,7 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 		wsError(w, http.StatusInternalServerError, "failed to save workspace")
 		return
 	}
+	h.ensureNamespace(r.Context(), in.Namespace)
 	wsJSON(w, http.StatusOK, ws)
 }
 
