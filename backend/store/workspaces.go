@@ -3,18 +3,11 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mdnest/mdnest/backend/secrets"
 )
-
-// PersonalNamespace derives a user's personal-workspace namespace from their
-// id: stable, collision-free and never user-controlled. Its owner has implicit
-// read/write access (the authz layer special-cases it), so it is excluded from
-// the grants model.
-func PersonalNamespace(userID int) string { return "user-" + strconv.Itoa(userID) }
 
 // Workspace is the per-namespace git remote configuration exposed to API
 // clients. It carries only metadata — never the stored credential. HasCredential

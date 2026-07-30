@@ -595,7 +595,7 @@ func main() {
 		// workspaces, plus each user's own personal workspace. The optional
 		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for
 		// SSRF; the primary control is the writer's egress NetworkPolicy).
-		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, stg,
+		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, grantStore, stg,
 			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","))
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
