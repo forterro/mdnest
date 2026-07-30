@@ -51,6 +51,11 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 	if uc == nil {
 		return true // single-user mode
 	}
+	// A user always has full access to their own personal workspace, which is
+	// excluded from the grants model (its name encodes the owner's id).
+	if namespace == store.PersonalNamespace(uc.ID) {
+		return true
+	}
 	if pc.hasAdminScope(uc, namespace) {
 		return true
 	}
@@ -69,6 +74,8 @@ func (pc *PermissionChecker) FilterNamespaces(r *http.Request, namespaces []stri
 	}
 
 	accessSet := make(map[string]bool)
+	// The caller's personal workspace is always theirs (excluded from grants).
+	accessSet[store.PersonalNamespace(uc.ID)] = true
 	if accessible, err := pc.grantStore.GetAccessibleNamespaces(uc.ID); err == nil {
 		for _, ns := range accessible {
 			accessSet[ns] = true

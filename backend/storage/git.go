@@ -139,6 +139,7 @@ type intervalCommitter struct {
 	authorName  string
 	authorEmail string
 	remote      remoteConfig
+	resolver    RemoteResolver // per-namespace mirror override; nil = env default only
 
 	mu    sync.Mutex
 	dirty map[string]dirtyEntry
@@ -369,7 +370,7 @@ func (c *intervalCommitter) commit(ctx context.Context, ns string) error {
 	// is a cheap "up-to-date" no-op, so this also flushes any commit whose push
 	// failed on an earlier flush (the namespace stays marked dirty until it
 	// succeeds).
-	if c.remote.enabled() {
+	if c.remote.enabled() || c.resolver != nil {
 		return c.pushWithBackoff(ctx, dir, ns)
 	}
 	return nil
@@ -405,22 +406,55 @@ func (c *intervalCommitter) pushWithBackoff(ctx context.Context, dir, ns string)
 	return nil
 }
 
-// push mirrors a namespace repo to its remote over HTTPS. Credentials are
-// supplied out-of-band via the askpass helper (see remoteConfig), never in argv.
+// push mirrors a namespace repo to its remote. The remote is the per-namespace
+// override from the resolver when one exists, otherwise the coarse env default.
+// Credentials are supplied out-of-band (askpass file for HTTPS, a staged key +
+// GIT_SSH_COMMAND for SSH), never in argv.
 func (c *intervalCommitter) push(ctx context.Context, dir, ns string) error {
-	remoteURL, err := c.remote.remoteURL(ns)
+	plan, ok, err := c.resolvePush(ns)
 	if err != nil {
-		return fmt.Errorf("git remote url %s: %w", ns, err)
+		return err
 	}
-	cmd := exec.CommandContext(ctx, "git", "push", remoteURL, "HEAD:refs/heads/"+c.remote.branch)
+	if !ok {
+		return nil // no remote configured for this namespace: local-only history
+	}
+	defer plan.cleanup()
+	cmd := exec.CommandContext(ctx, "git", "push", plan.url, "HEAD:refs/heads/"+plan.branch)
 	cmd.Dir = dir
-	cmd.Env = c.remote.pushEnv()
+	cmd.Env = plan.env
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git push %s: %v: %s", ns, err, stderr.String())
 	}
 	return nil
+}
+
+// resolvePush returns the mirror push plan for a namespace: the per-namespace
+// override from the resolver, else the coarse env default. ok=false means the
+// namespace has no remote and history stays local-only.
+func (c *intervalCommitter) resolvePush(ns string) (pushPlan, bool, error) {
+	if c.resolver != nil {
+		spec, ok, err := c.resolver.ResolveRemote(ns)
+		if err != nil {
+			return pushPlan{}, false, fmt.Errorf("git remote resolve %s: %w", ns, err)
+		}
+		if ok {
+			plan, err := planFromSpec(spec)
+			if err != nil {
+				return pushPlan{}, false, err
+			}
+			return plan, true, nil
+		}
+	}
+	if c.remote.enabled() {
+		plan, err := c.remote.plan(ns)
+		if err != nil {
+			return pushPlan{}, false, err
+		}
+		return plan, true, nil
+	}
+	return pushPlan{}, false, nil
 }
 
 func (c *intervalCommitter) git(ctx context.Context, dir string, args ...string) error {

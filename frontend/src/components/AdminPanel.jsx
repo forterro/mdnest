@@ -12,6 +12,9 @@ import {
   adminListNamespaceAdmins,
   adminAddNamespaceAdmin,
   adminRemoveNamespaceAdmin,
+  adminListWorkspaces,
+  adminSaveWorkspace,
+  adminDeleteWorkspace,
   getManageableNamespaces,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
@@ -57,10 +60,14 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
         <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}>Users</button>
         <button className={tab === 'grants' ? 'active' : ''} onClick={() => setTab('grants')}>Access Grants</button>
         <button className={tab === 'nsadmins' ? 'active' : ''} onClick={() => setTab('nsadmins')}>Namespace Admins</button>
+        {isSuperAdmin && (
+          <button className={tab === 'workspaces' ? 'active' : ''} onClick={() => setTab('workspaces')}>Git Workspaces</button>
+        )}
       </div>
       {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} userProvider={userProvider} />}
       {tab === 'grants' && <GrantsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
+      {tab === 'workspaces' && isSuperAdmin && <WorkspacesTab />}
     </div>
   );
 }
@@ -623,6 +630,143 @@ function NamespaceAdminsTab({ manageableNs }) {
           ))}
         </select>
         <button onClick={handlePromote} disabled={!pickUserId}>+ Make admin of {selectedNs}</button>
+      </div>
+    </div>
+  );
+}
+
+// WorkspacesTab: superadmin CRUD over shared/team git-workspace remotes.
+// Personal workspaces (is_personal) are shown read-only — they are managed by
+// their owner from Settings → Git remote. The stored credential is never
+// returned; the token field stays blank on edit (blank = keep the stored one).
+function WorkspacesTab() {
+  const empty = { namespace: '', git_enabled: true, transport: 'https', remote_url: '', username: 'oauth2', branch: 'main', known_hosts: '', credential: '' };
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(empty);
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setList(await adminListWorkspaces() || []);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
+  const reset = () => { setForm(empty); setEditId(null); setErr(''); };
+
+  const edit = (w) => {
+    setEditId(w.id);
+    setErr('');
+    setForm({ namespace: w.namespace, git_enabled: w.git_enabled, transport: w.transport, remote_url: w.remote_url, username: w.username, branch: w.branch, known_hosts: w.known_hosts || '', credential: '' });
+  };
+
+  const save = async () => {
+    setErr('');
+    try {
+      const payload = {
+        git_enabled: form.git_enabled,
+        transport: form.transport,
+        remote_url: form.remote_url.trim(),
+        username: form.username.trim(),
+        branch: form.branch.trim(),
+        known_hosts: form.known_hosts,
+      };
+      if (!editId) payload.namespace = form.namespace.trim();
+      if (form.credential) payload.credential = form.credential;
+      await adminSaveWorkspace(payload, editId || undefined);
+      reset();
+      load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  const del = async (w) => {
+    if (!confirm(`Delete the git remote for "${w.namespace}"? Notes stay; mirroring stops.`)) return;
+    try {
+      await adminDeleteWorkspace(w.id);
+      if (editId === w.id) reset();
+      load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  return (
+    <div className="admin-tab-content">
+      <p className="admin-description">
+        Per-namespace git remotes. A shared workspace mirrors a team namespace to
+        one repository; the credential is stored encrypted and never shown again.
+        Personal workspaces are managed by each user under Settings → Git remote.
+      </p>
+      {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
+
+      <div className="admin-form" style={{ display: 'grid', gap: '0.4rem', maxWidth: 620 }}>
+        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{editId ? `Edit "${form.namespace}"` : 'Add a shared workspace'}</div>
+        {!editId && (
+          <input className="modal-input" placeholder="namespace (e.g. team-a)" value={form.namespace} onChange={set('namespace')} />
+        )}
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          <select className="modal-input" value={form.transport} onChange={set('transport')} style={{ maxWidth: 160 }}>
+            <option value="https">HTTPS</option>
+            <option value="ssh">SSH</option>
+          </select>
+          <input className="modal-input" placeholder={form.transport === 'ssh' ? 'git@host:grp/ns.git' : 'https://host/grp/ns.git'} value={form.remote_url} onChange={set('remote_url')} style={{ flex: 1 }} />
+        </div>
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          {form.transport === 'https' && (
+            <input className="modal-input" placeholder="username (oauth2)" value={form.username} onChange={set('username')} style={{ maxWidth: 200 }} />
+          )}
+          <input className="modal-input" placeholder="branch (main)" value={form.branch} onChange={set('branch')} style={{ maxWidth: 160 }} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem' }}>
+            <input type="checkbox" checked={form.git_enabled} onChange={set('git_enabled')} /> enabled
+          </label>
+        </div>
+        {form.transport === 'ssh' && (
+          <textarea className="modal-input" rows={2} placeholder="known_hosts line (host ssh-ed25519 AAAA...)" value={form.known_hosts} onChange={set('known_hosts')} />
+        )}
+        <input className="modal-input" type="password" placeholder={form.transport === 'ssh' ? 'private key (blank = keep)' : 'PAT / deploy token (blank = keep)'} value={form.credential} onChange={set('credential')} />
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          <button className="modal-btn-primary" onClick={save}>{editId ? 'Save' : 'Add'}</button>
+          {editId && <button className="modal-btn" onClick={reset}>Cancel</button>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: '1rem' }}>
+        {loading ? (
+          <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
+        ) : list.length === 0 ? (
+          <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No workspaces configured.</p>
+        ) : (
+          <table className="admin-table">
+            <thead>
+              <tr><th>Namespace</th><th>Transport</th><th>Remote</th><th>Branch</th><th>Cred</th><th>On</th><th></th></tr>
+            </thead>
+            <tbody>
+              {list.map((w) => (
+                <tr key={w.id}>
+                  <td>{w.namespace}{w.is_personal && <span className="admin-scope-badge" style={{ marginLeft: 6 }}>personal</span>}</td>
+                  <td>{w.transport}</td>
+                  <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.remote_url}>{w.remote_url}</td>
+                  <td>{w.branch}</td>
+                  <td>{w.has_credential ? 'yes' : '-'}</td>
+                  <td>{w.git_enabled ? 'yes' : '-'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {!w.is_personal && <button className="modal-btn" onClick={() => edit(w)}>Edit</button>}
+                    {!w.is_personal && <button className="token-revoke" onClick={() => del(w)}>Delete</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
