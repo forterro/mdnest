@@ -33,27 +33,27 @@ import (
 //
 // localRoot is the absolute NOTES_DIR (the working tree for single/writer;
 // unused for app, which is filesystem-less).
-func FromEnv(ctx context.Context, localRoot string) (Storage, error) {
+func FromEnv(ctx context.Context, localRoot string, resolver RemoteResolver) (Storage, error) {
 	switch role := strings.ToLower(strings.TrimSpace(os.Getenv("MDNEST_ROLE"))); role {
 	case "", "single":
-		return fromEnvSingle(ctx, localRoot)
+		return fromEnvSingle(ctx, localRoot, resolver)
 	case "app":
 		return newAppStorage(ctx, localRoot)
 	case "writer":
-		return newWriterStorage(ctx, localRoot)
+		return newWriterStorage(ctx, localRoot, resolver)
 	default:
 		return nil, fmt.Errorf("storage: unknown MDNEST_ROLE %q (want single, app or writer)", role)
 	}
 }
 
 // fromEnvSingle builds the standalone backend selected by STORAGE_BACKEND.
-func fromEnvSingle(ctx context.Context, localRoot string) (Storage, error) {
+func fromEnvSingle(ctx context.Context, localRoot string, resolver RemoteResolver) (Storage, error) {
 	backend := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_BACKEND")))
 	switch backend {
 	case "", "local":
 		return NewLocalStorage(localRoot)
 	case "git":
-		gs, err := newGitStorageFromEnv(localRoot)
+		gs, err := newGitStorageFromEnv(localRoot, resolver)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +92,7 @@ func newAppStorage(ctx context.Context, _ string) (Storage, error) {
 // newWriterStorage builds the single writer: it owns the git tree, starts the
 // drain loop in a background goroutine, and serves reads through the working
 // set. The goroutine ends when ctx is cancelled or leadership is lost.
-func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
+func newWriterStorage(ctx context.Context, localRoot string, resolver RemoteResolver) (Storage, error) {
 	url := strings.TrimSpace(os.Getenv("REDIS_URL"))
 	if url == "" {
 		return nil, errors.New("storage: MDNEST_ROLE=writer requires REDIS_URL")
@@ -110,7 +110,7 @@ func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: writer leader election unavailable: %w", err)
 	}
-	gs, err := newGitStorageFromEnv(localRoot)
+	gs, err := newGitStorageFromEnv(localRoot, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
 // newGitStorageFromEnv builds a git backend (its interval committer and the
 // optional per-namespace remote mirror) from the environment. Shared by the
 // single-git and writer roles.
-func newGitStorageFromEnv(localRoot string) (*GitStorage, error) {
+func newGitStorageFromEnv(localRoot string, resolver RemoteResolver) (*GitStorage, error) {
 	debounce := durationEnv("GIT_COMMIT_DEBOUNCE", 2*time.Minute)
 	maxWait := durationEnv("GIT_COMMIT_MAX_WAIT", 10*time.Minute)
 	remote, err := remoteConfigFromEnv()
@@ -134,6 +134,7 @@ func newGitStorageFromEnv(localRoot string) (*GitStorage, error) {
 		return nil, err
 	}
 	committer := NewIntervalCommitter(localRoot, debounce, maxWait, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
+	committer.resolver = resolver
 	return NewGitStorage(localRoot, committer)
 }
 

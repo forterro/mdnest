@@ -72,6 +72,11 @@ func main() {
 	user := env("MDNEST_USER", "admin")
 	password := env("MDNEST_PASSWORD", "changeme")
 	jwtSecret := env("MDNEST_JWT_SECRET", "changeme")
+	// Secret used to seal per-workspace git credentials at rest (AES-256-GCM,
+	// key derived via SHA-256). Falls back to the JWT secret so one existing
+	// secret suffices; set MDNEST_ENCRYPTION_KEY to rotate git credentials
+	// independently of session tokens.
+	encryptionSecret := env("MDNEST_ENCRYPTION_KEY", jwtSecret)
 	notesDir := env("NOTES_DIR", "./notes")
 	frontendOrigin := env("FRONTEND_ORIGIN", "http://localhost:5173")
 	port := env("PORT", "8080")
@@ -99,7 +104,11 @@ func main() {
 	appCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
-	stg, err := storage.FromEnv(appCtx, absNotesDir)
+	// The per-workspace git remote resolver is DB-backed and only available
+	// once multi-mode Postgres is connected (below), so it is wired lazily here
+	// and its delegate is set after the workspace store is built.
+	wsResolver := &storage.LazyResolver{}
+	stg, err := storage.FromEnv(appCtx, absNotesDir, wsResolver)
 	if err != nil {
 		log.Fatalf("failed to initialize storage backend: %v", err)
 	}
@@ -316,10 +325,30 @@ func main() {
 	var perms *middleware.PermissionChecker
 	var grantStore store.GrantStore
 	var nsAdminStore store.NamespaceAdminStore
+	var workspaceStore store.WorkspaceStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
 		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
+
+		// Per-workspace git remote overrides: the store decrypts credentials and
+		// this adapter feeds the git committer, overriding the coarse
+		// GIT_REMOTE_URL default per namespace.
+		workspaceStore = store.NewPostgresWorkspaceStore(db, encryptionSecret)
+		wsResolver.Set(storage.RemoteResolverFunc(func(ns string) (storage.RemoteSpec, bool, error) {
+			r, err := workspaceStore.RemoteForNamespace(ns)
+			if err != nil || r == nil {
+				return storage.RemoteSpec{}, false, err
+			}
+			return storage.RemoteSpec{
+				Transport:  r.Transport,
+				RemoteURL:  r.RemoteURL,
+				Username:   r.Username,
+				Branch:     r.Branch,
+				Credential: r.Credential,
+				KnownHosts: r.KnownHosts,
+			}, true, nil
+		}))
 	}
 
 	// Live collaboration hub (optional, multi mode only)
