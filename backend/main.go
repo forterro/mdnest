@@ -591,6 +591,12 @@ func main() {
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
 		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		// Per-workspace git remote config: superadmin CRUD over shared/team
+		// workspaces, plus each user's own personal workspace. The optional
+		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for
+		// SSRF; the primary control is the writer's egress NetworkPolicy).
+		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore,
+			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","))
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
 		// Per-namespace scoping is done inside each handler so namespace
@@ -600,6 +606,11 @@ func main() {
 		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
 		mux.Handle("/api/admin/namespace-admins", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleNamespaceAdmins))))
 		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
+
+		// Per-workspace git remotes: admin CRUD is superadmin-only (it manages
+		// credentials); the personal workspace is self-service for any user.
+		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
+		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
 
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);
 		// PUT/DELETE (role change, user delete) are SuperAdmin-only —
