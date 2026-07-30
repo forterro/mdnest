@@ -610,6 +610,7 @@ func main() {
 		// Per-workspace git remotes: admin CRUD is superadmin-only (it manages
 		// credentials); the personal workspace is self-service for any user.
 		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
+		mux.Handle("/api/admin/workspace-groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleGroups))))
 		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
 
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);

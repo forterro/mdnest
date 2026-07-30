@@ -494,6 +494,52 @@ export async function adminDeleteWorkspace(id) {
   return res.json();
 }
 
+// Workspace groups: a shared git remote base (one repo per namespace), the
+// UI equivalent of the GIT_REMOTE_URL env provisioning.
+
+export async function adminListWorkspaceGroups() {
+  const res = await request('/admin/workspace-groups');
+  if (!res.ok) throw new Error('Failed to list workspace groups');
+  return res.json();
+}
+
+export async function adminSaveWorkspaceGroup(payload, id) {
+  const res = await request(id ? `/admin/workspace-groups?id=${id}` : '/admin/workspace-groups', {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save workspace group');
+  }
+  return res.json();
+}
+
+export async function adminDeleteWorkspaceGroup(id) {
+  const res = await request(`/admin/workspace-groups?id=${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete workspace group');
+  }
+  return res.json();
+}
+
+// Create a workspace inside a group: only the namespace is needed; it inherits
+// the group's remote base + credential.
+export async function adminCreateWorkspaceInGroup(namespace, groupId) {
+  const res = await request('/admin/workspaces', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ namespace, group_id: groupId }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create workspace in group');
+  }
+  return res.json();
+}
+
 export async function getMyWorkspace() {
   const res = await request('/me/workspace');
   if (!res.ok) throw new Error('Failed to load personal workspace');

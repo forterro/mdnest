@@ -13,10 +13,14 @@ import (
 
 // fakeWSStore is an in-memory store.WorkspaceStore recording the last write.
 type fakeWSStore struct {
-	personal   map[int]*store.Workspace
-	byNS       map[string]*store.Workspace
-	lastCreate store.WorkspaceInput
-	created    bool
+	personal    map[int]*store.Workspace
+	byNS        map[string]*store.Workspace
+	groups      map[int]*store.WorkspaceGroup
+	lastCreate  store.WorkspaceInput
+	created     bool
+	inGroupNS   string
+	inGroupID   int
+	inGroupCall bool
 }
 
 func (f *fakeWSStore) List() ([]store.Workspace, error)  { return nil, nil }
@@ -40,6 +44,25 @@ func (f *fakeWSStore) Update(_ int, in store.WorkspaceInput) (*store.Workspace, 
 func (f *fakeWSStore) Delete(int) (bool, error) { return true, nil }
 func (f *fakeWSStore) RemoteForNamespace(string) (*store.WorkspaceRemote, error) {
 	return nil, nil
+}
+func (f *fakeWSStore) ListGroups() ([]store.WorkspaceGroup, error) { return nil, nil }
+func (f *fakeWSStore) GetGroup(id int) (*store.WorkspaceGroup, error) {
+	return f.groups[id], nil
+}
+func (f *fakeWSStore) GetGroupByName(string) (*store.WorkspaceGroup, error) { return nil, nil }
+func (f *fakeWSStore) CreateGroup(in store.WorkspaceGroupInput) (*store.WorkspaceGroup, error) {
+	return &store.WorkspaceGroup{Name: in.Name, Transport: in.Transport, BaseURL: in.BaseURL}, nil
+}
+func (f *fakeWSStore) UpdateGroup(_ int, in store.WorkspaceGroupInput) (*store.WorkspaceGroup, error) {
+	return &store.WorkspaceGroup{Name: in.Name}, nil
+}
+func (f *fakeWSStore) DeleteGroup(int) (bool, error) { return true, nil }
+func (f *fakeWSStore) CreateInGroup(groupID int, ns string, _ bool) (*store.Workspace, error) {
+	f.inGroupCall = true
+	f.inGroupID = groupID
+	f.inGroupNS = ns
+	gid := groupID
+	return &store.Workspace{Namespace: ns, GroupID: &gid, GitEnabled: true}, nil
 }
 
 func mineReq(userID int, body string) *http.Request {
@@ -144,5 +167,55 @@ func TestMineGetDefaultWhenNone(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &got)
 	if got["namespace"] != "user-5" || got["configured"] != false {
 		t.Fatalf("unexpected default: %v", got)
+	}
+}
+
+// Creating a workspace with a group_id routes to CreateInGroup with the namespace.
+func TestAdminCreateInGroup(t *testing.T) {
+	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}, groups: map[int]*store.WorkspaceGroup{7: {ID: 7, Name: "dev", BaseURL: "https://gitlab.forterro.com/mdnest-workspaces/dev"}}}
+	h := NewWorkspaceHandler(fs, nil, nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(`{"namespace":"team-a","group_id":7}`))
+	w := httptest.NewRecorder()
+	h.HandleAdmin(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !fs.inGroupCall || fs.inGroupID != 7 || fs.inGroupNS != "team-a" {
+		t.Fatalf("CreateInGroup not called correctly: call=%v id=%d ns=%q", fs.inGroupCall, fs.inGroupID, fs.inGroupNS)
+	}
+	if fs.created {
+		t.Fatal("standalone Create must not be used for a grouped create")
+	}
+}
+
+// Creating in a nonexistent group is rejected before any write.
+func TestAdminCreateInMissingGroup(t *testing.T) {
+	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}, groups: map[int]*store.WorkspaceGroup{}}
+	h := NewWorkspaceHandler(fs, nil, nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(`{"namespace":"team-b","group_id":99}`))
+	w := httptest.NewRecorder()
+	h.HandleAdmin(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 for missing group", w.Code)
+	}
+	if fs.inGroupCall {
+		t.Fatal("must not create in a missing group")
+	}
+}
+
+// A group POST validates the base URL against the allow-list.
+func TestGroupCreateValidatesBaseURL(t *testing.T) {
+	h := NewWorkspaceHandler(&fakeWSStore{groups: map[int]*store.WorkspaceGroup{}}, nil, []string{"gitlab.forterro.com"})
+	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspace-groups", strings.NewReader(`{"name":"dev","transport":"https","base_url":"https://evil.example.com/g"}`))
+	w := httptest.NewRecorder()
+	h.HandleGroups(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 for disallowed host", w.Code)
+	}
+	r2 := httptest.NewRequest(http.MethodPost, "/api/admin/workspace-groups", strings.NewReader(`{"name":"dev","transport":"https","base_url":"https://gitlab.forterro.com/mdnest-workspaces/dev"}`))
+	w2 := httptest.NewRecorder()
+	h.HandleGroups(w2, r2)
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s, want 201", w2.Code, w2.Body.String())
 	}
 }
