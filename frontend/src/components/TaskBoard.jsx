@@ -285,14 +285,12 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
   }, [tasks]);
 
   return (
-    <div className="tb-overlay" role="dialog" aria-label="Task board">
+    <div className="tb-panel" role="region" aria-label="Task board">
       <div className="tb-header">
         <div className="tb-header-left">
-          <strong className="tb-title">Tasks</strong>
-          <span className="tb-ns">{ns}</span>
           <div className="tb-mode-toggle">
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
-            <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Board</button>
+            <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
           </div>
         </div>
         <div className="tb-header-right">
@@ -300,7 +298,6 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
           {canWrite && (
             <button className="tb-btn" onClick={() => setEditingColumns(true)} title="Edit columns">Columns…</button>
           )}
-          <button className="tb-btn tb-close" onClick={onClose} title="Close" aria-label="Close">&times;</button>
         </div>
       </div>
 

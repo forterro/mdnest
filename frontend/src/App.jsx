@@ -837,6 +837,7 @@ function App() {
   }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
+    setShowTaskBoard(false);
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
@@ -854,6 +855,7 @@ function App() {
   }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
+    setShowTaskBoard(false);
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -880,6 +882,7 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
+    setShowTaskBoard(false);
     // Clear any pending save timer from the previous file
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
@@ -1393,7 +1396,9 @@ function App() {
             }
           }}
           editorMode={editorMode}
+          boardActive={showTaskBoard}
           onEditorModeChange={(mode) => {
+            setShowTaskBoard(false);
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
             // User explicitly opted back into Live for this file — clear
@@ -1477,7 +1482,14 @@ function App() {
           </div>
         )}
         <div className="split-view">
-          {currentPath ? (
+          {showTaskBoard && selectedNs ? (
+            <TaskBoard
+              ns={selectedNs}
+              canWrite={canWrite('')}
+              onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
+              onClose={() => setShowTaskBoard(false)}
+            />
+          ) : currentPath ? (
             <>
               <div className="mobile-view-toggle">
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
@@ -1662,14 +1674,6 @@ function App() {
             setDismissedReleaseVer(v);
             setShowReleaseNotes(false);
           }}
-        />
-      )}
-      {showTaskBoard && selectedNs && (
-        <TaskBoard
-          ns={selectedNs}
-          canWrite={canWrite('')}
-          onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
-          onClose={() => setShowTaskBoard(false)}
         />
       )}
       {commentsEnabled && showComments && currentPath && (

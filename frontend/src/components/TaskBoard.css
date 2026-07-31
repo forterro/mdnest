@@ -1,9 +1,9 @@
 /* Namespace task board — Catppuccin Mocha palette to match the app. */
 
-.tb-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 900;
+.tb-panel {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: #1e1e2e;
@@ -97,6 +97,7 @@
 /* --- Board (kanban) --- */
 .tb-board {
   flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   gap: 14px;
   padding: 16px;
@@ -190,6 +191,7 @@
 /* --- List view --- */
 .tb-list {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
 }
