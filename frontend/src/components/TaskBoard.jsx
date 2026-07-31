@@ -21,7 +21,7 @@ function cardKey(t) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-function TaskCard({ task, canWrite, onOpen, onToggleStep }) {
+function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
@@ -81,6 +81,31 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep }) {
             </ul>
           )}
           {task.notes && <div className="tb-notes">{task.notes}</div>}
+          {canWrite && (
+            <div className="tb-edit" onPointerDown={noSwallow}>
+              <label>Priority
+                <select value={task.priority || ''} onChange={(e) => onSetField(task, 'priority', e.target.value)}>
+                  <option value="">—</option>
+                  <option value="high">high</option>
+                  <option value="medium">medium</option>
+                  <option value="low">low</option>
+                </select>
+              </label>
+              <label>Due
+                <input type="date" value={task.due || ''} onChange={(e) => onSetField(task, 'due', e.target.value)} />
+              </label>
+              <label>Tags
+                <input
+                  key={(task.tags || []).join(',')}
+                  type="text"
+                  defaultValue={(task.tags || []).join(', ')}
+                  placeholder="a, b"
+                  onKeyDown={(e) => { if (e.key === 'Enter') { onSetField(task, 'tags', e.target.value); e.currentTarget.blur(); } }}
+                  onBlur={(e) => onSetField(task, 'tags', e.target.value)}
+                />
+              </label>
+            </div>
+          )}
         </div>
       )}
 
@@ -100,7 +125,7 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep }) {
   );
 }
 
-function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep }) {
+function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onSetField }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   return (
     <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}`}>
@@ -110,7 +135,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep }) {
       </div>
       <div className="tb-column-body">
         {tasks.map((t) => (
-          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} />
+          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onSetField={onSetField} />
         ))}
         {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
       </div>
@@ -199,6 +224,18 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
       setError(e.message); await reload();
     }
   }, [ns, reload]);
+
+  // Edit a single metadata field (priority/due/tags/...) inline.
+  const handleSetField = useCallback(async (task, key, value) => {
+    const k = cardKey(task);
+    try {
+      const updated = await patchTask(ns, task.path, { line: task.line, raw: task.raw, setField: { key, value } });
+      applyUpdated(k, updated);
+    } catch (e) {
+      if (e.status === 409) { await reload(); return; }
+      setError(e.message);
+    }
+  }, [ns, applyUpdated, reload]);
 
   const handleDragStart = useCallback((event) => {
     setActiveTask(event.active?.data?.current?.task || null);
@@ -289,6 +326,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
                 canWrite={canWrite}
                 onOpen={onOpenNote}
                 onToggleStep={handleToggleStep}
+                onSetField={handleSetField}
               />
             ))}
           </div>

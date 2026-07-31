@@ -361,3 +361,17 @@
   padding: 0;
 }
 .tb-expand:hover { text-decoration: underline; }
+
+.tb-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; border-top: 1px solid #313244; padding-top: 8px; }
+.tb-edit label { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #a6adc8; }
+.tb-edit label > :is(select, input) {
+  flex: 1 1 auto;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 5px;
+  color: #cdd6f4;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+.tb-edit input[type="date"] { color-scheme: dark; }
