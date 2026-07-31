@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -111,6 +111,16 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
             &#9673;
           </button>
         </div>
+      )}
+      {onOpenBoard && (
+        <button
+          className="toolbar-board-btn"
+          onClick={onOpenBoard}
+          title="Namespace task board"
+          aria-label="Open task board"
+        >
+          Board
+        </button>
       )}
       {wsStatus && currentPath && (
         <span className={`ws-status ${wsStatus}`}>
