@@ -409,3 +409,37 @@
   color: #a6adc8;
   margin-bottom: 14px;
 }
+
+/* --- full task editor -------------------------------------------------- */
+.tb-editor { max-width: 560px; width: 92vw; max-height: 85vh; overflow-y: auto; }
+.tb-modal-field select,
+.tb-modal-field textarea,
+.tb-modal-field input {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  color: #cdd6f4;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+.tb-modal-field input[type="date"] { color-scheme: dark; }
+.tb-modal-field textarea { resize: vertical; }
+.tb-editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tb-check-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #a6adc8; margin-bottom: 14px; }
+.tb-check-field input { accent-color: #89b4fa; }
+.tb-editor-steps { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.tb-editor-step { display: flex; align-items: center; gap: 8px; }
+.tb-editor-step input[type="checkbox"] { accent-color: #89b4fa; }
+.tb-editor-step input:not([type="checkbox"]) {
+  flex: 1 1 auto;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  color: #cdd6f4;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+.tb-editor-step .danger { background: #313244; border: none; color: #cdd6f4; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+.tb-editor-step .danger:hover { background: #f38ba8; color: #11111b; }

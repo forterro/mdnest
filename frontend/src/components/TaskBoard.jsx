@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core';
 import { getTasks, patchTask, saveBoard, createTask } from '../api';
 import BoardColumnsEditor from './BoardColumnsEditor';
+import TaskEditor from './TaskEditor';
 import './TaskBoard.css';
 
 // A task is identified across the UI by its source location, which is unique
@@ -21,7 +22,7 @@ function cardKey(t) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField, onSetText }) {
+function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
@@ -81,40 +82,6 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField, onSetText 
             </ul>
           )}
           {task.notes && <div className="tb-notes">{task.notes}</div>}
-          {canWrite && (
-            <div className="tb-edit" onPointerDown={noSwallow}>
-              <label>Title
-                <input
-                  key={task.text}
-                  type="text"
-                  defaultValue={task.text}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { onSetText(task, e.target.value); e.currentTarget.blur(); } }}
-                  onBlur={(e) => onSetText(task, e.target.value)}
-                />
-              </label>
-              <label>Priority
-                <select value={task.priority || ''} onChange={(e) => onSetField(task, 'priority', e.target.value)}>
-                  <option value="">—</option>
-                  <option value="high">high</option>
-                  <option value="medium">medium</option>
-                  <option value="low">low</option>
-                </select>
-              </label>
-              <label>Due
-                <input type="date" value={task.due || ''} onChange={(e) => onSetField(task, 'due', e.target.value)} />
-              </label>
-              <label>Tags
-                <input
-                  key={(task.tags || []).join(',')}
-                  type="text"
-                  defaultValue={(task.tags || []).join(', ')}
-                  placeholder="a, b"
-                  onKeyDown={(e) => { if (e.key === 'Enter') { onSetField(task, 'tags', e.target.value); e.currentTarget.blur(); } }}
-                  onBlur={(e) => onSetField(task, 'tags', e.target.value)}
-                />
-              </label>
-            </div>
-          )}
         </div>
       )}
 
@@ -125,6 +92,10 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField, onSetText 
             {expanded ? '▾ less' : '▸ more'}
           </button>
         )}
+        {canWrite && (
+          <button type="button" className="tb-expand" onPointerDown={noSwallow}
+            onClick={(e) => { e.stopPropagation(); onEdit(task); }}>✎ edit</button>
+        )}
         <button type="button" className="tb-card-source" title={`Open ${task.path}`} onPointerDown={noSwallow}
           onClick={(e) => { e.stopPropagation(); onOpen(task.path); }}>
           {task.path}
@@ -134,7 +105,7 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField, onSetText 
   );
 }
 
-function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onSetField, onSetText }) {
+function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   return (
     <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}`}>
@@ -144,7 +115,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onSetField
       </div>
       <div className="tb-column-body">
         {tasks.map((t) => (
-          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onSetField={onSetField} onSetText={onSetText} />
+          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} />
         ))}
         {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
       </div>
@@ -165,10 +136,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [editingColumns, setEditingColumns] = useState(false);
   const [activeTask, setActiveTask] = useState(null);
   const [scope, setScope] = useState('workspace');
-  const [creating, setCreating] = useState(false);
-  const [newText, setNewText] = useState('');
-  const [newNote, setNewNote] = useState('');
-  const [newColumn, setNewColumn] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTask, setEditorTask] = useState(null);
 
   // The note-scoped view only makes sense with a note open.
   const effectiveScope = currentPath ? scope : 'workspace';
@@ -242,45 +211,24 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     }
   }, [ns, reload]);
 
-  // Edit a single metadata field (priority/due/tags/...) inline.
-  const handleSetField = useCallback(async (task, key, value) => {
-    const k = cardKey(task);
-    try {
-      const updated = await patchTask(ns, task.path, { line: task.line, raw: task.raw, setField: { key, value } });
-      applyUpdated(k, updated);
-    } catch (e) {
-      if (e.status === 409) { await reload(); return; }
-      setError(e.message);
-    }
-  }, [ns, applyUpdated, reload]);
+  const openEdit = useCallback((task) => { setEditorTask(task); setEditorOpen(true); }, []);
+  const openCreate = useCallback(() => { setEditorTask(null); setEditorOpen(true); }, []);
 
-  // Edit a task (or step) title.
-  const handleSetText = useCallback(async (task, text) => {
-    const t = (text || '').trim();
-    if (!t || t === task.text) return;
-    const k = cardKey(task);
+  // Create (append) or replace a whole task from the editor's spec.
+  const handleEditorSave = useCallback(async (spec, note) => {
     try {
-      const updated = await patchTask(ns, task.path, { line: task.line, raw: task.raw, text: t });
-      applyUpdated(k, updated);
-    } catch (e) {
-      if (e.status === 409) { await reload(); return; }
-      setError(e.message);
-    }
-  }, [ns, applyUpdated, reload]);
-
-  // Create a task in the chosen note (or the board's default note).
-  const handleCreate = useCallback(async () => {
-    const text = newText.trim();
-    if (!text) return;
-    try {
-      await createTask(ns, { text, note: newNote.trim() || undefined, column: newColumn || undefined });
-      setNewText('');
-      setCreating(false);
+      if (editorTask) {
+        await patchTask(ns, editorTask.path, { line: editorTask.line, raw: editorTask.raw, replace: spec });
+      } else {
+        await createTask(ns, { note: note || undefined, ...spec });
+      }
+      setEditorOpen(false);
       await reload();
     } catch (e) {
+      if (e.status === 409) { setEditorOpen(false); await reload(); return; }
       setError(e.message);
     }
-  }, [ns, newText, newNote, newColumn, reload]);
+  }, [ns, editorTask, reload]);
 
   const handleDragStart = useCallback((event) => {
     setActiveTask(event.active?.data?.current?.task || null);
@@ -346,11 +294,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         </div>
         <div className="tb-header-right">
           {canWrite && (
-            <button className="tb-btn" onClick={() => {
-              setNewNote(board?.defaultNote || (effectiveScope === 'note' ? currentPath : '') || '');
-              setNewColumn('');
-              setCreating(true);
-            }} title="New task">+ New task</button>
+            <button className="tb-btn" onClick={openCreate} title="New task">+ New task</button>
           )}
           <button className="tb-btn" onClick={reload} title="Refresh">&#8635;</button>
           {canWrite && (
@@ -358,34 +302,6 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           )}
         </div>
       </div>
-      {creating && (
-        <div className="tb-new-task">
-          <input
-            className="tb-new-text"
-            autoFocus
-            placeholder="Task title"
-            value={newText}
-            onChange={(e) => setNewText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setCreating(false); }}
-          />
-          <input
-            className="tb-new-note"
-            placeholder={board?.defaultNote ? `note (default: ${board.defaultNote})` : 'note (e.g. tasks.md)'}
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            list="tb-note-list"
-          />
-          <datalist id="tb-note-list">
-            {[...new Set(tasks.map((t) => t.path))].map((p) => <option key={p} value={p} />)}
-          </datalist>
-          <select className="tb-new-col" value={newColumn} onChange={(e) => setNewColumn(e.target.value)}>
-            <option value="">column…</option>
-            {(board?.columns || []).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
-          </select>
-          <button className="tb-btn primary" onClick={handleCreate} disabled={!newText.trim()}>Add</button>
-          <button className="tb-btn" onClick={() => setCreating(false)}>Cancel</button>
-        </div>
-      )}
 
       {error && <div className="tb-error">{error}</div>}
 
@@ -409,8 +325,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 canWrite={canWrite}
                 onOpen={onOpenNote}
                 onToggleStep={handleToggleStep}
-                onSetField={handleSetField}
-                onSetText={handleSetText}
+                onEdit={openEdit}
               />
             ))}
           </div>
@@ -441,6 +356,9 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                       />
                       <span className="tb-list-text">{t.text || <em>(empty)</em>}</span>
                     </label>
+                    {canWrite && (
+                      <button type="button" className="tb-expand" onClick={() => openEdit(t)} title="Edit task">✎</button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -463,6 +381,17 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
               setError(e.message);
             }
           }}
+        />
+      )}
+      {editorOpen && (
+        <TaskEditor
+          board={board}
+          task={editorTask}
+          defaultNote={editorTask ? editorTask.path : (board?.defaultNote || (effectiveScope === 'note' ? currentPath : '') || '')}
+          defaultColumn={editorTask ? editorTask.column : ''}
+          notePaths={[...new Set(tasks.map((t) => t.path))]}
+          onSave={handleEditorSave}
+          onCancel={() => setEditorOpen(false)}
         />
       )}
     </div>

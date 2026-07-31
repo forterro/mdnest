@@ -234,6 +234,70 @@ func TestApplyText(t *testing.T) {
 	}
 }
 
+func TestRenderTaskBlock(t *testing.T) {
+	b := defaultBoard()
+	s := taskSpec{
+		Title: "Design UI", Column: "doing", Due: "2024-01-15",
+		Priority: "high", Workload: "hard", Tags: []string{"design", "ui"},
+		DefaultExpanded: true,
+		Steps:           []stepSpec{{Text: "Wireframes", Checked: true}, {Text: "Visual", Checked: false}},
+		Notes:           "line1\nline2",
+	}
+	got := strings.Join(renderTaskBlock(b, s), "\n")
+	want := strings.Join([]string{
+		"- [ ] Design UI",
+		"  - status: doing",
+		"  - due: 2024-01-15",
+		"  - priority: high",
+		"  - workload: hard",
+		"  - tags: [design, ui]",
+		"  - defaultExpanded: true",
+		"  - steps:",
+		"    - [x] Wireframes",
+		"    - [ ] Visual",
+		"  - notes: |",
+		"    line1",
+		"    line2",
+	}, "\n")
+	if got != want {
+		t.Fatalf("render mismatch:\n got=%q\nwant=%q", got, want)
+	}
+	// Round-trip: parse it back.
+	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
+	if len(tasks) != 1 || tasks[0].Status != "doing" || len(tasks[0].Steps) != 2 || tasks[0].Priority != "high" {
+		t.Fatalf("round-trip failed: %+v", tasks)
+	}
+	// Done column: checkbox, no status.
+	if g := strings.Join(renderTaskBlock(b, taskSpec{Title: "x", Column: "done"}), "\n"); g != "- [x] x" {
+		t.Fatalf("done render = %q", g)
+	}
+}
+
+func TestReplaceTaskBlock(t *testing.T) {
+	b := defaultBoard()
+	lines := []string{
+		"# Notes",
+		"- [ ] Old",
+		"  - status: doing",
+		"  - due: 2020-01-01",
+		"- [ ] Keep me",
+	}
+	out, ok := replaceTaskBlock(lines, 1, b, taskSpec{Title: "New", Column: "todo", Priority: "low"})
+	if !ok {
+		t.Fatal("replace failed")
+	}
+	joined := strings.Join(out, "\n")
+	if !strings.Contains(joined, "- [ ] New") || !strings.Contains(joined, "  - priority: low") {
+		t.Fatalf("new block missing: %q", joined)
+	}
+	if strings.Contains(joined, "2020-01-01") {
+		t.Fatalf("old block not removed: %q", joined)
+	}
+	if !strings.Contains(joined, "- [ ] Keep me") {
+		t.Fatalf("following task lost: %q", joined)
+	}
+}
+
 func TestValidBoard(t *testing.T) {
 	if validBoard(BoardConfig{}) {
 		t.Error("empty board should be invalid")

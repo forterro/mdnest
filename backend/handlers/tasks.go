@@ -123,6 +123,27 @@ type taskMutation struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
 	} `json:"setField,omitempty"`
+	// Replace rewrites the whole task (checkbox line + detail block) from a spec.
+	Replace *taskSpec `json:"replace,omitempty"`
+}
+
+// taskSpec is a full task definition used to create or replace a task and its
+// detail block (the board editor's payload). Column drives the checkbox + status.
+type taskSpec struct {
+	Title           string     `json:"title"`
+	Column          string     `json:"column"`
+	Due             string     `json:"due"`
+	Priority        string     `json:"priority"`
+	Workload        string     `json:"workload"`
+	Tags            []string   `json:"tags"`
+	DefaultExpanded bool       `json:"defaultExpanded"`
+	Steps           []stepSpec `json:"steps"`
+	Notes           string     `json:"notes"`
+}
+
+type stepSpec struct {
+	Text    string `json:"text"`
+	Checked bool   `json:"checked"`
 }
 
 // taskLineRe matches a GFM task-list item: indent, bullet, checkbox, rest.
@@ -583,6 +604,92 @@ func applyText(line, text string) (string, bool) {
 	return m[1] + m[2] + " [" + box + "] " + strings.TrimSpace(text), true
 }
 
+// renderTaskBlock renders a task and its detail block as markdown lines (base
+// indent 0). The column sets the checkbox (Done -> [x]) and, when not Done, the
+// status field; only non-empty fields are emitted.
+func renderTaskBlock(b BoardConfig, s taskSpec) []string {
+	var col *BoardColumn
+	for i := range b.Columns {
+		if b.Columns[i].ID == s.Column {
+			col = &b.Columns[i]
+			break
+		}
+	}
+	box, status := " ", ""
+	if col != nil {
+		if col.Done {
+			box = "x"
+		} else {
+			status = col.statusValue()
+		}
+	}
+	lines := []string{"- [" + box + "] " + strings.TrimSpace(s.Title)}
+	add := func(k, v string) {
+		if strings.TrimSpace(v) != "" {
+			lines = append(lines, "  - "+k+": "+strings.TrimSpace(v))
+		}
+	}
+	add("status", status)
+	add("due", s.Due)
+	add("priority", s.Priority)
+	add("workload", s.Workload)
+	var tags []string
+	for _, t := range s.Tags {
+		if t = strings.TrimSpace(t); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	if len(tags) > 0 {
+		lines = append(lines, "  - tags: ["+strings.Join(tags, ", ")+"]")
+	}
+	if s.DefaultExpanded {
+		lines = append(lines, "  - defaultExpanded: true")
+	}
+	var steps []stepSpec
+	for _, st := range s.Steps {
+		if strings.TrimSpace(st.Text) != "" {
+			steps = append(steps, st)
+		}
+	}
+	if len(steps) > 0 {
+		lines = append(lines, "  - steps:")
+		for _, st := range steps {
+			sb := " "
+			if st.Checked {
+				sb = "x"
+			}
+			lines = append(lines, "    - ["+sb+"] "+strings.TrimSpace(st.Text))
+		}
+	}
+	if strings.TrimSpace(s.Notes) != "" {
+		lines = append(lines, "  - notes: |")
+		for _, nl := range strings.Split(strings.TrimRight(s.Notes, "\n"), "\n") {
+			lines = append(lines, "    "+nl)
+		}
+	}
+	return lines
+}
+
+// replaceTaskBlock swaps the whole task at cardIdx (checkbox line + detail
+// block) for a freshly-rendered block from spec, preserving the card's indent.
+func replaceTaskBlock(lines []string, cardIdx int, b BoardConfig, s taskSpec) ([]string, bool) {
+	if taskLineRe.FindStringSubmatch(lines[cardIdx]) == nil {
+		return lines, false
+	}
+	_, end := detailBlockRange(lines, cardIdx)
+	block := renderTaskBlock(b, s)
+	if pad := indentWidth(lines[cardIdx]); pad > 0 {
+		prefix := strings.Repeat(" ", pad)
+		for i := range block {
+			block[i] = prefix + block[i]
+		}
+	}
+	out := append([]string{}, lines[:cardIdx]...)
+	out = append(out, block...)
+	out = append(out, lines[end:]...)
+	return out, true
+}
+
 // setChecked flips the checkbox on a task line.
 func setChecked(line string, checked bool) (string, bool) {
 	m := taskLineRe.FindStringSubmatch(line)
@@ -619,17 +726,15 @@ func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Text   string `json:"text"`
-		Note   string `json:"note"`
-		Column string `json:"column"`
+		Note string `json:"note"`
+		taskSpec
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
 		return
 	}
-	text := strings.TrimSpace(req.Text)
-	if text == "" {
-		http.Error(w, `{"error":"task text is required"}`, http.StatusBadRequest)
+	if strings.TrimSpace(req.Title) == "" {
+		http.Error(w, `{"error":"task title is required"}`, http.StatusBadRequest)
 		return
 	}
 	board := h.loadBoard(ctx, ns)
@@ -646,17 +751,14 @@ func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid note path"}`, http.StatusBadRequest)
 		return
 	}
-	// Append the task, creating the note if it does not exist yet.
+	// Append the rendered task, creating the note if it does not exist yet.
 	data, _ := h.store.ReadFile(ctx, ns, relPath)
 	var lines []string
 	if len(strings.TrimRight(string(data), "\n")) > 0 {
 		lines = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	}
-	lines = append(lines, "- [ ] "+text)
-	cardIdx := len(lines) - 1
-	if c := strings.TrimSpace(req.Column); c != "" {
-		lines, _ = applyColumnRich(lines, cardIdx, board, c)
-	}
+	cardIdx := len(lines)
+	lines = append(lines, renderTaskBlock(board, req.taskSpec)...)
 	newData := []byte(strings.Join(lines, "\n") + "\n")
 	if err := h.store.WriteFile(ctx, ns, relPath, newData); err != nil {
 		http.Error(w, `{"error":"failed to write note"}`, http.StatusInternalServerError)
@@ -757,8 +859,8 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
 		return
 	}
-	if mut.ToColumn == "" && mut.Checked == nil && mut.SetField == nil && mut.Text == nil {
-		http.Error(w, `{"error":"toColumn, checked, text or setField is required"}`, http.StatusBadRequest)
+	if mut.ToColumn == "" && mut.Checked == nil && mut.SetField == nil && mut.Text == nil && mut.Replace == nil {
+		http.Error(w, `{"error":"toColumn, checked, text, setField or replace is required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -775,7 +877,14 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	board := h.loadBoard(ctx, ns)
-	if mut.ToColumn != "" {
+	if mut.Replace != nil {
+		var ok2 bool
+		lines, ok2 = replaceTaskBlock(lines, mut.Line-1, board, *mut.Replace)
+		if !ok2 {
+			http.Error(w, `{"error":"not a task"}`, http.StatusBadRequest)
+			return
+		}
+	} else if mut.ToColumn != "" {
 		var ok2 bool
 		lines, ok2 = applyColumnRich(lines, mut.Line-1, board, mut.ToColumn)
 		if !ok2 {
