@@ -313,9 +313,25 @@ export async function searchNotes(ns, query) {
 
 // Aggregate every markdown task-list item in the namespace plus the board
 // column layout. Returns { board: {version, columns}, tasks: [...] }.
-export async function getTasks(ns) {
-  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}`);
+export async function getTasks(ns, path) {
+  const q = path ? `&path=${encodeURIComponent(path)}` : '';
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}${q}`);
   if (!res.ok) throw new Error('Failed to load tasks');
+  return res.json();
+}
+
+// Create a task by appending it to a note. `body` is { text, note?, column? };
+// when note is omitted the board's default note is used.
+export async function createTask(ns, body) {
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create task');
+  }
   return res.json();
 }
 

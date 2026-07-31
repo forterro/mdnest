@@ -8,7 +8,7 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
-import { getTasks, patchTask, saveBoard } from '../api';
+import { getTasks, patchTask, saveBoard, createTask } from '../api';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import './TaskBoard.css';
 
@@ -21,7 +21,7 @@ function cardKey(t) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField }) {
+function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField, onSetText }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
@@ -83,6 +83,15 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField }) {
           {task.notes && <div className="tb-notes">{task.notes}</div>}
           {canWrite && (
             <div className="tb-edit" onPointerDown={noSwallow}>
+              <label>Title
+                <input
+                  key={task.text}
+                  type="text"
+                  defaultValue={task.text}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { onSetText(task, e.target.value); e.currentTarget.blur(); } }}
+                  onBlur={(e) => onSetText(task, e.target.value)}
+                />
+              </label>
               <label>Priority
                 <select value={task.priority || ''} onChange={(e) => onSetField(task, 'priority', e.target.value)}>
                   <option value="">—</option>
@@ -125,7 +134,7 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onSetField }) {
   );
 }
 
-function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onSetField }) {
+function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onSetField, onSetText }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   return (
     <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}`}>
@@ -135,7 +144,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onSetField
       </div>
       <div className="tb-column-body">
         {tasks.map((t) => (
-          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onSetField={onSetField} />
+          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onSetField={onSetField} onSetText={onSetText} />
         ))}
         {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
       </div>
@@ -147,7 +156,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onSetField
 // item in the namespace, either as a flat list (with checkbox toggling) or as
 // a kanban board (drag a card between columns). Both views project the same
 // data — the notes themselves — so a change in one is reflected in the other.
-export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
+export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath }) {
   const [board, setBoard] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -155,6 +164,14 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
   const [mode, setMode] = useState(() => localStorage.getItem('mdnest_taskboard_mode') || 'board');
   const [editingColumns, setEditingColumns] = useState(false);
   const [activeTask, setActiveTask] = useState(null);
+  const [scope, setScope] = useState('workspace');
+  const [creating, setCreating] = useState(false);
+  const [newText, setNewText] = useState('');
+  const [newNote, setNewNote] = useState('');
+  const [newColumn, setNewColumn] = useState('');
+
+  // The note-scoped view only makes sense with a note open.
+  const effectiveScope = currentPath ? scope : 'workspace';
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -165,7 +182,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await getTasks(ns);
+      const data = await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined);
       setBoard(data.board);
       setTasks(data.tasks || []);
     } catch (e) {
@@ -173,7 +190,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [ns]);
+  }, [ns, effectiveScope, currentPath]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -237,6 +254,34 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
     }
   }, [ns, applyUpdated, reload]);
 
+  // Edit a task (or step) title.
+  const handleSetText = useCallback(async (task, text) => {
+    const t = (text || '').trim();
+    if (!t || t === task.text) return;
+    const k = cardKey(task);
+    try {
+      const updated = await patchTask(ns, task.path, { line: task.line, raw: task.raw, text: t });
+      applyUpdated(k, updated);
+    } catch (e) {
+      if (e.status === 409) { await reload(); return; }
+      setError(e.message);
+    }
+  }, [ns, applyUpdated, reload]);
+
+  // Create a task in the chosen note (or the board's default note).
+  const handleCreate = useCallback(async () => {
+    const text = newText.trim();
+    if (!text) return;
+    try {
+      await createTask(ns, { text, note: newNote.trim() || undefined, column: newColumn || undefined });
+      setNewText('');
+      setCreating(false);
+      await reload();
+    } catch (e) {
+      setError(e.message);
+    }
+  }, [ns, newText, newNote, newColumn, reload]);
+
   const handleDragStart = useCallback((event) => {
     setActiveTask(event.active?.data?.current?.task || null);
   }, []);
@@ -292,14 +337,55 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
           </div>
+          {currentPath && (
+            <div className="tb-mode-toggle">
+              <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScope('workspace')} title="All notes in the workspace">Workspace</button>
+              <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScope('note')} title="Only the current note">This note</button>
+            </div>
+          )}
         </div>
         <div className="tb-header-right">
+          {canWrite && (
+            <button className="tb-btn" onClick={() => {
+              setNewNote(board?.defaultNote || (effectiveScope === 'note' ? currentPath : '') || '');
+              setNewColumn('');
+              setCreating(true);
+            }} title="New task">+ New task</button>
+          )}
           <button className="tb-btn" onClick={reload} title="Refresh">&#8635;</button>
           {canWrite && (
             <button className="tb-btn" onClick={() => setEditingColumns(true)} title="Edit columns">Columns…</button>
           )}
         </div>
       </div>
+      {creating && (
+        <div className="tb-new-task">
+          <input
+            className="tb-new-text"
+            autoFocus
+            placeholder="Task title"
+            value={newText}
+            onChange={(e) => setNewText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setCreating(false); }}
+          />
+          <input
+            className="tb-new-note"
+            placeholder={board?.defaultNote ? `note (default: ${board.defaultNote})` : 'note (e.g. tasks.md)'}
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            list="tb-note-list"
+          />
+          <datalist id="tb-note-list">
+            {[...new Set(tasks.map((t) => t.path))].map((p) => <option key={p} value={p} />)}
+          </datalist>
+          <select className="tb-new-col" value={newColumn} onChange={(e) => setNewColumn(e.target.value)}>
+            <option value="">column…</option>
+            {(board?.columns || []).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+          </select>
+          <button className="tb-btn primary" onClick={handleCreate} disabled={!newText.trim()}>Add</button>
+          <button className="tb-btn" onClick={() => setCreating(false)}>Cancel</button>
+        </div>
+      )}
 
       {error && <div className="tb-error">{error}</div>}
 
@@ -324,6 +410,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
                 onOpen={onOpenNote}
                 onToggleStep={handleToggleStep}
                 onSetField={handleSetField}
+                onSetText={handleSetText}
               />
             ))}
           </div>

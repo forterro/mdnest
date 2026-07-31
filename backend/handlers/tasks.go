@@ -68,6 +68,9 @@ func (c BoardColumn) statusValue() string {
 type BoardConfig struct {
 	Version int           `json:"version"`
 	Columns []BoardColumn `json:"columns"`
+	// DefaultNote is the note new tasks are appended to when the caller does not
+	// pick one (namespace-relative path, e.g. "tasks.md").
+	DefaultNote string `json:"defaultNote,omitempty"`
 }
 
 // Step is a sub-task: a checkbox nested in a task's indented detail block.
@@ -112,6 +115,8 @@ type taskMutation struct {
 	Raw      string `json:"raw"`
 	ToColumn string `json:"toColumn,omitempty"`
 	Checked  *bool  `json:"checked,omitempty"`
+	// Text rewrites the task/step title (checkbox state preserved).
+	Text *string `json:"text,omitempty"`
 	// SetField edits a single metadata bullet in the card's detail block
 	// (due/priority/tags/workload/status); an empty value removes the field.
 	SetField *struct {
@@ -564,6 +569,20 @@ func applyField(lines []string, cardIdx int, key, value string) ([]string, bool)
 	return lines, true
 }
 
+// applyText rewrites a task or step line's title, preserving its indent, bullet
+// and checkbox state. ok=false when the line is not a task.
+func applyText(line, text string) (string, bool) {
+	m := taskLineRe.FindStringSubmatch(line)
+	if m == nil {
+		return line, false
+	}
+	box := " "
+	if m[3] == "x" || m[3] == "X" {
+		box = "x"
+	}
+	return m[1] + m[2] + " [" + box + "] " + strings.TrimSpace(text), true
+}
+
 // setChecked flips the checkbox on a task line.
 func setChecked(line string, checked bool) (string, bool) {
 	m := taskLineRe.FindStringSubmatch(line)
@@ -582,11 +601,76 @@ func (h *TaskHandler) HandleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.aggregate(w, r)
+	case http.MethodPost:
+		h.create(w, r)
 	case http.MethodPatch:
 		h.mutate(w, r)
 	default:
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
+}
+
+// create appends a new task line to a note (the request's note, else the board's
+// DefaultNote), optionally placing it in a column, and returns the created task.
+func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
+		return
+	}
+	var req struct {
+		Text   string `json:"text"`
+		Note   string `json:"note"`
+		Column string `json:"column"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		http.Error(w, `{"error":"task text is required"}`, http.StatusBadRequest)
+		return
+	}
+	board := h.loadBoard(ctx, ns)
+	note := strings.TrimSpace(req.Note)
+	if note == "" {
+		note = strings.TrimSpace(board.DefaultNote)
+	}
+	if note == "" {
+		http.Error(w, `{"error":"no target note: pass note or set a default in board settings"}`, http.StatusBadRequest)
+		return
+	}
+	relPath, ok := SafeRelPath(note)
+	if !ok {
+		http.Error(w, `{"error":"invalid note path"}`, http.StatusBadRequest)
+		return
+	}
+	// Append the task, creating the note if it does not exist yet.
+	data, _ := h.store.ReadFile(ctx, ns, relPath)
+	var lines []string
+	if len(strings.TrimRight(string(data), "\n")) > 0 {
+		lines = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	}
+	lines = append(lines, "- [ ] "+text)
+	cardIdx := len(lines) - 1
+	if c := strings.TrimSpace(req.Column); c != "" {
+		lines, _ = applyColumnRich(lines, cardIdx, board, c)
+	}
+	newData := []byte(strings.Join(lines, "\n") + "\n")
+	if err := h.store.WriteFile(ctx, ns, relPath, newData); err != nil {
+		http.Error(w, `{"error":"failed to write note"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	for _, tk := range parseNoteTasks(relPath, newData, board) {
+		if tk.Line == cardIdx+1 {
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(tk)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusCreated)
 }
 
 func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
@@ -598,18 +682,25 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 	board := h.loadBoard(ctx, ns)
 
 	var files []string
-	h.store.Walk(ctx, ns, "", func(relPath string, info storage.FileInfo) error {
-		if info.IsDir {
-			if relPath != "" && strings.HasPrefix(info.Name, ".") {
-				return storage.SkipDir
+	if p := strings.TrimSpace(r.URL.Query().Get("path")); p != "" {
+		// Scope to a single note (the "this note" board view).
+		if rel, ok := SafeRelPath(p); ok {
+			files = []string{rel}
+		}
+	} else {
+		h.store.Walk(ctx, ns, "", func(relPath string, info storage.FileInfo) error {
+			if info.IsDir {
+				if relPath != "" && strings.HasPrefix(info.Name, ".") {
+					return storage.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(strings.ToLower(info.Name), ".md") {
+				files = append(files, relPath)
 			}
 			return nil
-		}
-		if strings.HasSuffix(strings.ToLower(info.Name), ".md") {
-			files = append(files, relPath)
-		}
-		return nil
-	})
+		})
+	}
 
 	var (
 		mu    sync.Mutex
@@ -666,8 +757,8 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
 		return
 	}
-	if mut.ToColumn == "" && mut.Checked == nil && mut.SetField == nil {
-		http.Error(w, `{"error":"toColumn, checked or setField is required"}`, http.StatusBadRequest)
+	if mut.ToColumn == "" && mut.Checked == nil && mut.SetField == nil && mut.Text == nil {
+		http.Error(w, `{"error":"toColumn, checked, text or setField is required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -698,6 +789,13 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"not a task or field not editable"}`, http.StatusBadRequest)
 			return
 		}
+	} else if mut.Text != nil {
+		newLine, ok2 := applyText(lines[mut.Line-1], *mut.Text)
+		if !ok2 {
+			http.Error(w, `{"error":"not a task"}`, http.StatusBadRequest)
+			return
+		}
+		lines[mut.Line-1] = newLine
 	} else {
 		newLine, ok2 := setChecked(lines[mut.Line-1], *mut.Checked)
 		if !ok2 {

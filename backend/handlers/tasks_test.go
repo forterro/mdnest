@@ -219,6 +219,21 @@ func TestApplyField(t *testing.T) {
 	}
 }
 
+func TestApplyText(t *testing.T) {
+	got, ok := applyText("- [ ] old title", "new title")
+	if !ok || got != "- [ ] new title" {
+		t.Fatalf("rename = (%q,%v)", got, ok)
+	}
+	// Checkbox state and indent/bullet are preserved.
+	got, ok = applyText("  * [x] done", "still done")
+	if !ok || got != "  * [x] still done" {
+		t.Fatalf("preserve = (%q,%v)", got, ok)
+	}
+	if _, ok := applyText("plain", "x"); ok {
+		t.Error("non-task should fail")
+	}
+}
+
 func TestValidBoard(t *testing.T) {
 	if validBoard(BoardConfig{}) {
 		t.Error("empty board should be invalid")
