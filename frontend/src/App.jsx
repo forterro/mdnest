@@ -1486,6 +1486,7 @@ function App() {
             <TaskBoard
               ns={selectedNs}
               canWrite={canWrite('')}
+              currentPath={currentPath}
               onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
               onClose={() => setShowTaskBoard(false)}
             />

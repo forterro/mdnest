@@ -13,6 +13,7 @@ export default function BoardColumnsEditor({ board, onCancel, onSave }) {
   const [columns, setColumns] = useState(() =>
     (board?.columns || []).map((c) => ({ ...c }))
   );
+  const [defaultNote, setDefaultNote] = useState(board?.defaultNote || '');
   const [err, setErr] = useState(null);
 
   const update = (idx, patch) => {
@@ -56,13 +57,21 @@ export default function BoardColumnsEditor({ board, onCancel, onSave }) {
     });
     if (normalized.length === 0) { setErr('At least one column is required'); return; }
     if (normalized.some((c) => !c.title)) { setErr('Every column needs a title'); return; }
-    onSave({ version: board?.version || 1, columns: normalized });
+    onSave({ version: board?.version || 1, columns: normalized, defaultNote: defaultNote.trim() });
   };
 
   return (
     <div className="tb-modal-backdrop" onClick={onCancel}>
       <div className="tb-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Board columns</h3>
+        <h3>Board settings</h3>
+        <label className="tb-modal-field">Default note for new tasks
+          <input
+            className="tb-col-title"
+            value={defaultNote}
+            placeholder="tasks.md"
+            onChange={(e) => setDefaultNote(e.target.value)}
+          />
+        </label>
         <p className="tb-modal-hint">
           The <strong>status</strong> is written into a task's
           <code>status:</code> field when you drop it here. Mark one column
