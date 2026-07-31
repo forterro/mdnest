@@ -349,6 +349,16 @@ func main() {
 				KnownHosts: r.KnownHosts,
 			}, true, nil
 		}))
+
+		// The durability writer records each namespace's last mirror sync outcome
+		// on its workspace row so the owner sees why mirroring fails (bad token,
+		// missing branch, unreachable remote) instead of a silently-empty ns. Only
+		// the writer/single git storage implements the sink; the app tier does not.
+		if r, ok := stg.(interface {
+			SetSyncStatusSink(storage.SyncStatusSink)
+		}); ok {
+			r.SetSyncStatusSink(workspaceStore)
+		}
 	}
 
 	// Live collaboration hub (optional, multi mode only)

@@ -14,22 +14,27 @@ import (
 // reports whether a PAT / SSH key is on file so the UI can show "configured"
 // without ever reading the secret back.
 type Workspace struct {
-	ID            int       `json:"id"`
-	Namespace     string    `json:"namespace"`
-	OwnerID       *int      `json:"owner_id,omitempty"`    // nil = shared/team workspace
-	OwnerEmail    string    `json:"owner_email,omitempty"` // resolved via join, for admin UIs
-	IsPersonal    bool      `json:"is_personal"`
-	GitEnabled    bool      `json:"git_enabled"`
-	Transport     string    `json:"transport"` // "https" | "ssh"
-	RemoteURL     string    `json:"remote_url"`
-	Username      string    `json:"username"`
-	Branch        string    `json:"branch"`
-	KnownHosts    string    `json:"known_hosts,omitempty"` // SSH host keys (public), not a secret
-	HasCredential bool      `json:"has_credential"`
-	GroupID       *int      `json:"group_id,omitempty"`   // set when the workspace belongs to a group
-	GroupName     string    `json:"group_name,omitempty"` // resolved via join, for admin UIs
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            int    `json:"id"`
+	Namespace     string `json:"namespace"`
+	OwnerID       *int   `json:"owner_id,omitempty"`    // nil = shared/team workspace
+	OwnerEmail    string `json:"owner_email,omitempty"` // resolved via join, for admin UIs
+	IsPersonal    bool   `json:"is_personal"`
+	GitEnabled    bool   `json:"git_enabled"`
+	Transport     string `json:"transport"` // "https" | "ssh"
+	RemoteURL     string `json:"remote_url"`
+	Username      string `json:"username"`
+	Branch        string `json:"branch"`
+	KnownHosts    string `json:"known_hosts,omitempty"` // SSH host keys (public), not a secret
+	HasCredential bool   `json:"has_credential"`
+	GroupID       *int   `json:"group_id,omitempty"`   // set when the workspace belongs to a group
+	GroupName     string `json:"group_name,omitempty"` // resolved via join, for admin UIs
+	// LastSyncError is the error from the writer's most recent mirror sync (''
+	// when the last sync succeeded); LastSyncAt is when it was recorded. Surfaced
+	// in the UI so a failing mirror is visible instead of a silently-empty ns.
+	LastSyncError string     `json:"last_sync_error,omitempty"`
+	LastSyncAt    *time.Time `json:"last_sync_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // WorkspaceRemote is the decrypted per-namespace remote used by the git backend
@@ -76,6 +81,10 @@ type WorkspaceStore interface {
 	// RemoteForNamespace returns the decrypted, git-enabled remote for a
 	// namespace, or (nil, nil) when the namespace has no configured override.
 	RemoteForNamespace(ns string) (*WorkspaceRemote, error)
+	// SetSyncStatus records the outcome of the writer's last mirror sync for a
+	// namespace (syncErr == '' clears the error). A no-op for namespaces with no
+	// workspace row (e.g. the coarse env-default mirror).
+	SetSyncStatus(ns, syncErr string) error
 
 	// --- workspace groups: a shared git remote base (one repo per namespace),
 	// the DB/UI equivalent of the GIT_REMOTE_URL env provisioning. Workspaces
@@ -108,6 +117,7 @@ const workspaceSelect = `
 	       w.git_enabled, w.transport, w.remote_url, w.username, w.branch,
 	       w.known_hosts, (w.credential_encrypted <> '') AS has_credential,
 	       w.group_id, COALESCE(g.name, ''),
+	       w.last_sync_error, w.last_sync_at,
 	       w.created_at, w.updated_at
 	FROM workspaces w
 	LEFT JOIN users u ON u.id = w.owner_id
@@ -226,6 +236,17 @@ func (s *PostgresWorkspaceStore) Delete(id int) (bool, error) {
 	return n > 0, nil
 }
 
+// SetSyncStatus records the outcome of the writer's last mirror sync for a
+// namespace. syncErr is ” on success. It targets the standalone workspace row
+// by namespace; grouped members are keyed by their own namespace too, so both
+// resolve. Namespaces with no row (the coarse env-default mirror) are a no-op.
+func (s *PostgresWorkspaceStore) SetSyncStatus(ns, syncErr string) error {
+	_, err := s.db.Exec(
+		`UPDATE workspaces SET last_sync_error = $2, last_sync_at = now() WHERE namespace = $1`,
+		ns, syncErr)
+	return err
+}
+
 func (s *PostgresWorkspaceStore) RemoteForNamespace(ns string) (*WorkspaceRemote, error) {
 	var (
 		r           WorkspaceRemote
@@ -311,10 +332,12 @@ func scanWorkspace(row rowScanner) (Workspace, error) {
 	var w Workspace
 	var ownerID sql.NullInt64
 	var groupID sql.NullInt64
+	var lastSyncAt sql.NullTime
 	if err := row.Scan(
 		&w.ID, &w.Namespace, &ownerID, &w.OwnerEmail, &w.IsPersonal,
 		&w.GitEnabled, &w.Transport, &w.RemoteURL, &w.Username, &w.Branch,
 		&w.KnownHosts, &w.HasCredential, &groupID, &w.GroupName,
+		&w.LastSyncError, &lastSyncAt,
 		&w.CreatedAt, &w.UpdatedAt,
 	); err != nil {
 		return Workspace{}, err
@@ -326,6 +349,10 @@ func scanWorkspace(row rowScanner) (Workspace, error) {
 	if groupID.Valid {
 		id := int(groupID.Int64)
 		w.GroupID = &id
+	}
+	if lastSyncAt.Valid {
+		t := lastSyncAt.Time
+		w.LastSyncAt = &t
 	}
 	return w, nil
 }

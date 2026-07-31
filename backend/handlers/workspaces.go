@@ -198,6 +198,10 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := requireCredentialForMirror(in, false); err != nil {
+		wsError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	in.Namespace = ns
 	in.OwnerID = nil // shared/team workspace
 	in.IsPersonal = false
@@ -241,6 +245,10 @@ func (h *WorkspaceHandler) adminUpdate(w http.ResponseWriter, r *http.Request) {
 	} else {
 		var err error
 		if in, err = h.inputFrom(req, req.GitEnabled); err != nil {
+			wsError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := requireCredentialForMirror(in, existing.HasCredential); err != nil {
 			wsError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -499,6 +507,10 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 		_, _ = h.store.Delete(existing.ID)
 		existing = nil
 	}
+	if err := requireCredentialForMirror(in, existing != nil && existing.HasCredential); err != nil {
+		wsError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	var ws *store.Workspace
 	if existing == nil {
 		ws, err = h.store.Create(in)
@@ -555,6 +567,28 @@ func (h *WorkspaceHandler) inputFrom(req workspaceRequest, gitEnabled bool) (sto
 		KnownHosts: req.KnownHosts,
 		Credential: req.Credential,
 	}, nil
+}
+
+// requireCredentialForMirror rejects enabling git mirroring without a usable
+// credential: mdnest must authenticate to push (durability) and to seed a
+// private remote, so an empty token/key would only fail silently in the
+// background. hasExistingCredential reports whether one is already stored (kept
+// when the request leaves the field blank).
+func requireCredentialForMirror(in store.WorkspaceInput, hasExistingCredential bool) error {
+	if !in.GitEnabled {
+		return nil
+	}
+	has := hasExistingCredential
+	if in.Credential != nil { // a provided value replaces; an empty string clears
+		has = strings.TrimSpace(*in.Credential) != ""
+	}
+	if has {
+		return nil
+	}
+	if in.Transport == "ssh" {
+		return errors.New("an SSH private key is required to enable mirroring")
+	}
+	return errors.New("an access token is required to enable HTTPS mirroring")
 }
 
 // validateRemote checks the URL shape per transport and enforces the optional
