@@ -185,6 +185,40 @@ func TestSetChecked(t *testing.T) {
 	}
 }
 
+func TestApplyField(t *testing.T) {
+	// Insert a field on a simple task: materialise a detail block.
+	out, ok := applyField([]string{"- [ ] task"}, 0, "priority", "high")
+	if !ok || len(out) != 2 || out[1] != "  - priority: high" {
+		t.Fatalf("insert = %#v ok=%v", out, ok)
+	}
+
+	// Update an existing field in place.
+	out, ok = applyField([]string{"- [ ] task", "  - due: 2024-01-01"}, 0, "due", "2024-02-02")
+	if !ok || out[1] != "  - due: 2024-02-02" {
+		t.Fatalf("update = %#v ok=%v", out, ok)
+	}
+
+	// Tags are wrapped in brackets when a bare list is supplied.
+	out, ok = applyField([]string{"- [ ] task"}, 0, "tags", "a, b")
+	if !ok || out[1] != "  - tags: [a, b]" {
+		t.Fatalf("tags = %#v ok=%v", out, ok)
+	}
+
+	// An empty value removes the field.
+	out, ok = applyField([]string{"- [ ] task", "  - priority: high"}, 0, "priority", "")
+	if !ok || len(out) != 1 {
+		t.Fatalf("remove = %#v ok=%v", out, ok)
+	}
+
+	// Non-editable field and non-task line are rejected.
+	if _, ok := applyField([]string{"- [ ] task"}, 0, "evil", "x"); ok {
+		t.Error("non-editable field should fail")
+	}
+	if _, ok := applyField([]string{"plain"}, 0, "due", "x"); ok {
+		t.Error("non-task line should fail")
+	}
+}
+
 func TestValidBoard(t *testing.T) {
 	if validBoard(BoardConfig{}) {
 		t.Error("empty board should be invalid")

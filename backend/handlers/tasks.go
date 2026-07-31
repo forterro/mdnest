@@ -112,6 +112,12 @@ type taskMutation struct {
 	Raw      string `json:"raw"`
 	ToColumn string `json:"toColumn,omitempty"`
 	Checked  *bool  `json:"checked,omitempty"`
+	// SetField edits a single metadata bullet in the card's detail block
+	// (due/priority/tags/workload/status); an empty value removes the field.
+	SetField *struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	} `json:"setField,omitempty"`
 }
 
 // taskLineRe matches a GFM task-list item: indent, bullet, checkbox, rest.
@@ -508,6 +514,56 @@ func applyColumnRich(lines []string, cardIdx int, b BoardConfig, colID string) (
 	return lines, true
 }
 
+// editableField reports whether key is a metadata field the API may set inline.
+func editableField(key string) bool {
+	switch key {
+	case "due", "priority", "workload", "tags", "status":
+		return true
+	}
+	return false
+}
+
+// applyField sets, updates or removes a "- key: value" metadata bullet in the
+// card's detail block (an empty value removes it, materialising or pruning the
+// block as needed). Only whitelisted fields are editable. Returns ok=false when
+// the line is not a task or the field is not editable.
+func applyField(lines []string, cardIdx int, key, value string) ([]string, bool) {
+	if taskLineRe.FindStringSubmatch(lines[cardIdx]) == nil {
+		return lines, false
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	if !editableField(key) {
+		return lines, false
+	}
+	value = strings.TrimSpace(value)
+	if key == "tags" && value != "" && !strings.HasPrefix(value, "[") {
+		value = "[" + value + "]"
+	}
+	start, end := detailBlockRange(lines, cardIdx)
+	idx := -1
+	for j := start; j < end; j++ {
+		if m := metaLineRe.FindStringSubmatch(lines[j]); m != nil && strings.EqualFold(m[1], key) {
+			idx = j
+			break
+		}
+	}
+	if value == "" {
+		if idx >= 0 {
+			lines = append(lines[:idx], lines[idx+1:]...)
+		}
+		return lines, true
+	}
+	if idx >= 0 {
+		lead := lines[idx][:len(lines[idx])-len(strings.TrimLeft(lines[idx], " \t"))]
+		lines[idx] = lead + "- " + key + ": " + value
+		return lines, true
+	}
+	child := strings.Repeat(" ", indentWidth(lines[cardIdx])+2) + "- " + key + ": " + value
+	at := cardIdx + 1
+	lines = append(lines[:at], append([]string{child}, lines[at:]...)...)
+	return lines, true
+}
+
 // setChecked flips the checkbox on a task line.
 func setChecked(line string, checked bool) (string, bool) {
 	m := taskLineRe.FindStringSubmatch(line)
@@ -610,8 +666,8 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
 		return
 	}
-	if mut.ToColumn == "" && mut.Checked == nil {
-		http.Error(w, `{"error":"toColumn or checked is required"}`, http.StatusBadRequest)
+	if mut.ToColumn == "" && mut.Checked == nil && mut.SetField == nil {
+		http.Error(w, `{"error":"toColumn, checked or setField is required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -633,6 +689,13 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 		lines, ok2 = applyColumnRich(lines, mut.Line-1, board, mut.ToColumn)
 		if !ok2 {
 			http.Error(w, `{"error":"unknown column or not a task"}`, http.StatusBadRequest)
+			return
+		}
+	} else if mut.SetField != nil {
+		var ok2 bool
+		lines, ok2 = applyField(lines, mut.Line-1, mut.SetField.Key, mut.SetField.Value)
+		if !ok2 {
+			http.Error(w, `{"error":"not a task or field not editable"}`, http.StatusBadRequest)
 			return
 		}
 	} else {
