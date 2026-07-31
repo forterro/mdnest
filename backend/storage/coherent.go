@@ -79,6 +79,15 @@ func newCoherentStorage(inner Storage, ws WorkingSet, maxBytes int64) Storage {
 	return c
 }
 
+// SetSyncStatusSink forwards a sync-status sink to the inner git storage so the
+// writer reports per-namespace mirror outcomes. No-op when the inner backend
+// does not support it. Promoted to coherentRangeStorage via embedding.
+func (c *CoherentStorage) SetSyncStatusSink(s SyncStatusSink) {
+	if g, ok := c.Storage.(interface{ SetSyncStatusSink(SyncStatusSink) }); ok {
+		g.SetSyncStatusSink(s)
+	}
+}
+
 // Close tears down the inner backend (if it is a Closer, e.g. GitStorage stops
 // its committer) and the working set connection.
 func (c *CoherentStorage) Close() error {

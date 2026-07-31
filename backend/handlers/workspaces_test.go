@@ -45,6 +45,7 @@ func (f *fakeWSStore) Delete(int) (bool, error) { return true, nil }
 func (f *fakeWSStore) RemoteForNamespace(string) (*store.WorkspaceRemote, error) {
 	return nil, nil
 }
+func (f *fakeWSStore) SetSyncStatus(string, string) error          { return nil }
 func (f *fakeWSStore) ListGroups() ([]store.WorkspaceGroup, error) { return nil, nil }
 func (f *fakeWSStore) GetGroup(id int) (*store.WorkspaceGroup, error) {
 	return f.groups[id], nil
@@ -124,6 +125,22 @@ func TestMinePutRejectsBadRemote(t *testing.T) {
 	}
 	if fs.created {
 		t.Fatal("stored a workspace despite an invalid remote")
+	}
+}
+
+// Enabling mirroring without any credential (none provided, none stored) is
+// rejected so it can't sit silently failing in the background.
+func TestMinePutRequiresCredentialForMirror(t *testing.T) {
+	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
+	h := NewWorkspaceHandler(fs, fakeUsers{email: "me@forterro.com"}, &fakeGrants{}, nil, nil)
+	body := `{"git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/me/notes.git"}`
+	w := httptest.NewRecorder()
+	h.HandleMine(w, mineReq(7, body))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (no credential)", w.Code)
+	}
+	if fs.created {
+		t.Fatal("stored a mirror workspace without a credential")
 	}
 }
 

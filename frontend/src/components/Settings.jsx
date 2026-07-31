@@ -179,6 +179,19 @@ function GitRemoteTab() {
       {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
       {msg && <div style={{ color: '#a6e3a1', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{msg}</div>}
 
+      {ws && ws.git_enabled && ws.last_sync_error && (
+        <div style={{ background: '#302028', border: '1px solid #f38ba8', borderRadius: '6px', padding: '0.5rem 0.7rem', marginBottom: '0.6rem' }}>
+          <div style={{ color: '#f38ba8', fontSize: '0.82rem', fontWeight: 600 }}>Last mirror sync failed</div>
+          <div style={{ color: '#f2cdcd', fontSize: '0.78rem', marginTop: '0.2rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{ws.last_sync_error}</div>
+          {ws.last_sync_at && <div style={{ color: '#9399b2', fontSize: '0.72rem', marginTop: '0.25rem' }}>at {new Date(ws.last_sync_at).toLocaleString()}</div>}
+        </div>
+      )}
+      {ws && ws.git_enabled && !ws.last_sync_error && ws.last_sync_at && (
+        <div style={{ color: '#a6e3a1', fontSize: '0.78rem', marginBottom: '0.6rem' }}>
+          Last mirror sync OK — {new Date(ws.last_sync_at).toLocaleString()}
+        </div>
+      )}
+
       <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
         <input type="checkbox" checked={gitEnabled} onChange={(e) => setGitEnabled(e.target.checked)} />
         Enable mirroring

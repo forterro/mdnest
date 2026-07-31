@@ -119,3 +119,56 @@ func TestCommitterTwoWaySync(t *testing.T) {
 		t.Fatal("reconciler not called for the pulled note")
 	}
 }
+
+// statusSinkFunc adapts a func to the SyncStatusSink interface for tests.
+type statusSinkFunc func(ns, msg string) error
+
+func (f statusSinkFunc) SetSyncStatus(ns, msg string) error { return f(ns, msg) }
+
+// TestSyncReportsStatusToSink verifies a failing mirror sync is reported to the
+// status sink (so the UI can surface it) and a subsequent success clears it.
+func TestSyncReportsStatusToSink(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+
+	// A base URL pointing at a nonexistent bare repo: the fetch/push fails.
+	bogus := filepath.Join(t.TempDir(), "missing")
+	c := NewIntervalCommitter(root, time.Hour, time.Hour, "ci", "ci@example.com",
+		remoteConfig{baseURL: bogus, branch: "main"})
+	defer c.Close()
+
+	got := map[string]string{}
+	var sink SyncStatusSink = statusSinkFunc(func(ns, msg string) error {
+		got[ns] = msg
+		return nil
+	})
+	c.statusSink.Store(&sink)
+
+	if err := os.Mkdir(filepath.Join(root, "team"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Empty namespace, unreachable remote: the sync fails and is reported.
+	_ = c.commit(ctx, "team")
+	if got["team"] == "" {
+		t.Fatalf("expected a non-empty sync error to be reported")
+	}
+
+	// Point at a real, reachable bare remote and sync again: status clears.
+	realBase := t.TempDir()
+	run(t, "", "git", "init", "--bare", "--quiet", "-b", "main", filepath.Join(realBase, "team.git"))
+	c.remote = remoteConfig{baseURL: realBase, branch: "main"}
+	delete(c.pushNext, "team") // clear the backoff window from the failure above
+	delete(c.pushFails, "team")
+	if err := os.WriteFile(filepath.Join(root, "team", "n.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.commit(ctx, "team"); err != nil {
+		t.Fatalf("recovery sync: %v", err)
+	}
+	if got["team"] != "" {
+		t.Fatalf("expected the error to clear on success, got %q", got["team"])
+	}
+}

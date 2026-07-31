@@ -68,6 +68,16 @@ func (g *GitStorage) SetSyncInterval(d time.Duration) {
 	}
 }
 
+// SetSyncStatusSink installs a sink that receives each namespace's last mirror
+// sync outcome (error text, or "" on success), so a failing mirror is visible to
+// the user instead of a silently-empty namespace. No-op unless the git backend
+// uses the interval committer (single/writer roles).
+func (g *GitStorage) SetSyncStatusSink(s SyncStatusSink) {
+	if c, ok := g.committer.(*intervalCommitter); ok {
+		c.statusSink.Store(&s)
+	}
+}
+
 // --- mutations: do the filesystem op, then record the namespace as dirty ---
 
 func (g *GitStorage) WriteFile(ctx context.Context, ns, relPath string, data []byte) error {
@@ -143,6 +153,13 @@ func (NoopCommitter) Close() error                { return nil }
 // paths are dropped.
 type reconcileFn func(ctx context.Context, ns string, changed, removed []string)
 
+// SyncStatusSink records the outcome of a namespace's most recent mirror sync so
+// it can be surfaced to the user (e.g. persisted on the workspace row). syncErr
+// is "" when the last sync succeeded.
+type SyncStatusSink interface {
+	SetSyncStatus(ns, syncErr string) error
+}
+
 // intervalCommitter commits dirty namespaces to per-namespace git repos once
 // the writer has gone idle on them, rather than on a fixed interval: an edit
 // burst (many rapid saves during a live editing session) is coalesced into a
@@ -171,6 +188,10 @@ type intervalCommitter struct {
 	// syncInterval (nanoseconds) is how often to pull remote changes even with no
 	// local edits; 0 disables the periodic pull. Set by the factory.
 	syncInterval atomic.Int64
+	// statusSink records each namespace's last sync outcome (nil = not reported).
+	// lastStatus dedupes writes so only a changed status is persisted.
+	statusSink atomic.Pointer[SyncStatusSink]
+	lastStatus map[string]string
 
 	mu    sync.Mutex
 	dirty map[string]dirtyEntry
@@ -233,6 +254,7 @@ func NewIntervalCommitter(root string, debounce, maxWait time.Duration, authorNa
 		dirty:       make(map[string]dirtyEntry),
 		pushNext:    make(map[string]time.Time),
 		pushFails:   make(map[string]int),
+		lastStatus:  make(map[string]string),
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
 	}
@@ -461,11 +483,33 @@ func (c *intervalCommitter) syncWithBackoff(ctx context.Context, dir, ns string)
 		if n == 1 || n%10 == 0 { // log the first failure and every 10th, not every retry
 			log.Printf("storage: git sync %s failed (attempt %d, backing off %s): %v", ns, n, backoff, err)
 		}
+		c.reportStatus(ns, err.Error())
 		return err
 	}
 	delete(c.pushFails, ns)
 	delete(c.pushNext, ns)
+	c.reportStatus(ns, "")
 	return nil
+}
+
+// reportStatus persists a namespace's last sync outcome via the status sink,
+// de-duplicating so only a changed status is written (the sink is a DB row).
+func (c *intervalCommitter) reportStatus(ns, msg string) {
+	p := c.statusSink.Load()
+	if p == nil || *p == nil {
+		return
+	}
+	const maxLen = 500
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+	}
+	if prev, ok := c.lastStatus[ns]; ok && prev == msg {
+		return // unchanged since the last report: skip the DB write
+	}
+	c.lastStatus[ns] = msg
+	if err := (*p).SetSyncStatus(ns, msg); err != nil {
+		log.Printf("storage: record sync status for %s: %v", ns, err)
+	}
 }
 
 // sync performs one two-way synchronisation of a namespace repo with its remote:

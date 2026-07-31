@@ -190,6 +190,17 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_workspaces_group_id ON workspaces(group_id);
 		`,
 	},
+	{
+		// Per-namespace mirror sync status: the durability writer records the
+		// outcome of the last two-way sync on the workspace row so the owner sees
+		// why mirroring is failing (bad token, missing branch, unreachable remote)
+		// instead of a silently-empty namespace. last_sync_error is '' on success.
+		name: "011_workspace_sync_status",
+		sql: `
+			ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_sync_error TEXT NOT NULL DEFAULT '';
+			ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMPTZ;
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
