@@ -7,8 +7,8 @@ function slugify(s) {
 
 // BoardColumnsEditor is a small modal for editing the per-namespace kanban
 // column layout (.mdnest/board.json). Column ids are stable once created; the
-// user edits the title, the status tag written into note lines, and which
-// column holds checked ("done") items.
+// user edits the title, the status value written into a task's `status:` field,
+// and which column holds checked ("done") items.
 export default function BoardColumnsEditor({ board, onCancel, onSave }) {
   const [columns, setColumns] = useState(() =>
     (board?.columns || []).map((c) => ({ ...c }))
@@ -36,7 +36,7 @@ export default function BoardColumnsEditor({ board, onCancel, onSave }) {
       const ids = new Set(cur.map((c) => c.id));
       let id = `col-${cur.length + 1}`;
       while (ids.has(id)) id = `${id}-x`;
-      return [...cur, { id, title: 'New column', tag: '', done: false }];
+      return [...cur, { id, title: 'New column', status: '', done: false }];
     });
   };
 
@@ -50,7 +50,7 @@ export default function BoardColumnsEditor({ board, onCancel, onSave }) {
       return {
         id,
         title: c.title.trim(),
-        tag: slugify(c.tag || ''),
+        status: slugify(c.status || c.tag || ''),
         done: !!c.done,
       };
     });
@@ -64,9 +64,9 @@ export default function BoardColumnsEditor({ board, onCancel, onSave }) {
       <div className="tb-modal" onClick={(e) => e.stopPropagation()}>
         <h3>Board columns</h3>
         <p className="tb-modal-hint">
-          The <strong>tag</strong> is the marker written on a task line
-          (e.g. <code>#doing</code>). Mark one column <strong>Done</strong> to
-          hold checked items.
+          The <strong>status</strong> is written into a task's
+          <code>status:</code> field when you drop it here. Mark one column
+          <strong>Done</strong> to hold checked items.
         </p>
         {err && <div className="tb-error">{err}</div>}
         <div className="tb-col-editor">
@@ -80,9 +80,9 @@ export default function BoardColumnsEditor({ board, onCancel, onSave }) {
               />
               <input
                 className="tb-col-tag"
-                value={c.tag}
-                placeholder="tag"
-                onChange={(e) => update(i, { tag: e.target.value })}
+                value={c.status ?? c.tag ?? ''}
+                placeholder="status"
+                onChange={(e) => update(i, { status: e.target.value })}
               />
               <label className="tb-col-done" title="Holds checked items">
                 <input

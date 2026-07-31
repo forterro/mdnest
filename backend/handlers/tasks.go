@@ -18,10 +18,16 @@ import (
 // TaskHandler aggregates GitHub-flavoured task-list items ("- [ ] ...") across
 // every note in a namespace and exposes them as a flat list (for a task view)
 // or grouped into board columns (for a kanban view). The markdown notes remain
-// the single source of truth: a task's column is derived from its checkbox
-// state and an optional status tag on the same line (e.g. "#doing"). Moving a
-// card between columns rewrites that line in the owning note, so the two views
-// are just projections of the same data.
+// the single source of truth.
+//
+// A task may be enriched by an indented detail block directly under its checkbox
+// line — metadata bullets ("- status:", "- due:", "- priority:", "- workload:",
+// "- tags: [a, b]", "- defaultExpanded:"), nested step checkboxes (any indented
+// checkbox is a step of the task above it), and a description ("- notes: |" block
+// or a fenced code block). A task's column is derived from its checkbox state
+// (checked → the Done column) and its "status:" field, falling back to a legacy
+// inline "#tag". Moving a card writes the target column's status into the note,
+// materialising a minimal detail block for a previously-simple task.
 //
 // Column definitions live in a per-namespace sidecar (.mdnest/board.json),
 // mirroring the .mdnest/comments convention. When the sidecar is absent a
@@ -35,14 +41,27 @@ func NewTaskHandler(store storage.Storage) *TaskHandler {
 	return &TaskHandler{store: store}
 }
 
-// BoardColumn is a single kanban column. Tag is the status marker matched on a
-// task line (e.g. "doing" matches "#doing"). Done marks the column that holds
-// checked items ("- [x] ...").
+// BoardColumn is a single kanban column. Status is the value written to a task's
+// `status:` field for this column (falling back to the legacy Tag, then the id).
+// Tag is still read so inline "#tag" status markers keep working. Done marks the
+// column that holds checked items ("- [x] ...").
 type BoardColumn struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Tag   string `json:"tag"`
-	Done  bool   `json:"done,omitempty"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status,omitempty"`
+	Tag    string `json:"tag,omitempty"`
+	Done   bool   `json:"done,omitempty"`
+}
+
+// statusValue is the value written to a task's `status:` field for this column.
+func (c BoardColumn) statusValue() string {
+	if c.Status != "" {
+		return c.Status
+	}
+	if c.Tag != "" {
+		return c.Tag
+	}
+	return c.ID
 }
 
 // BoardConfig is the per-namespace column layout stored in .mdnest/board.json.
@@ -51,15 +70,32 @@ type BoardConfig struct {
 	Columns []BoardColumn `json:"columns"`
 }
 
-// Task is one aggregated task-list item.
+// Step is a sub-task: a checkbox nested in a task's indented detail block.
+type Step struct {
+	Text    string `json:"text"`
+	Checked bool   `json:"checked"`
+	Line    int    `json:"line"` // 1-based line within the note
+	Raw     string `json:"raw"`  // exact source line, for optimistic mutation
+}
+
+// Task is one aggregated task-list item, optionally enriched by an indented
+// detail block (metadata bullets, nested step checkboxes and a description).
 type Task struct {
-	ID      string `json:"id"`      // content-stable id (namespace-relative path + text)
-	Path    string `json:"path"`    // note that owns the item
-	Line    int    `json:"line"`    // 1-based line number within the note
-	Raw     string `json:"raw"`     // exact source line, used for optimistic mutation
-	Text    string `json:"text"`    // item text without checkbox or status tag
-	Checked bool   `json:"checked"` // "- [x]" vs "- [ ]"
-	Column  string `json:"column"`  // resolved column id
+	ID              string   `json:"id"`   // content-stable id (path + title)
+	Path            string   `json:"path"` // note that owns the item
+	Line            int      `json:"line"` // 1-based line of the checkbox
+	Raw             string   `json:"raw"`  // exact source line, for optimistic mutation
+	Text            string   `json:"text"` // title without checkbox or status tag
+	Checked         bool     `json:"checked"`
+	Column          string   `json:"column"` // resolved column id
+	Status          string   `json:"status,omitempty"`
+	Due             string   `json:"due,omitempty"`
+	Priority        string   `json:"priority,omitempty"`
+	Workload        string   `json:"workload,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	DefaultExpanded bool     `json:"defaultExpanded,omitempty"`
+	Steps           []Step   `json:"steps,omitempty"`
+	Notes           string   `json:"notes,omitempty"`
 }
 
 // TasksResponse is the payload of GET /api/tasks.
@@ -150,8 +186,11 @@ func stripStatusTags(b BoardConfig, rest string) string {
 	return strings.TrimSpace(out)
 }
 
-// resolveColumn maps a task's checkbox + status tag to a board column id.
-func resolveColumn(b BoardConfig, checked bool, rest string) string {
+// columnFor resolves a task's board column from its checkbox state, an explicit
+// status field, and (legacy) an inline "#tag" in its title. Precedence: a
+// checked box is always the Done column; otherwise the status field, then an
+// inline tag, then the first non-done column.
+func columnFor(b BoardConfig, checked bool, status, titleRest string) string {
 	if checked {
 		for _, c := range b.Columns {
 			if c.Done {
@@ -163,8 +202,15 @@ func resolveColumn(b BoardConfig, checked bool, rest string) string {
 		}
 		return ""
 	}
+	if status != "" {
+		for _, c := range b.Columns {
+			if !c.Done && strings.EqualFold(c.statusValue(), status) {
+				return c.ID
+			}
+		}
+	}
 	for _, c := range b.Columns {
-		if hasStatusTag(rest, c.Tag) {
+		if !c.Done && hasStatusTag(titleRest, c.Tag) {
 			return c.ID
 		}
 	}
@@ -179,42 +225,287 @@ func resolveColumn(b BoardConfig, checked bool, rest string) string {
 	return ""
 }
 
+// resolveColumn maps a task's checkbox + inline status tag to a board column id.
+func resolveColumn(b BoardConfig, checked bool, rest string) string {
+	return columnFor(b, checked, "", rest)
+}
+
 func taskID(relPath, text string) string {
 	sum := sha1.Sum([]byte(relPath + "\x00" + text))
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// applyColumn rewrites a task line so it belongs to the target column: checking
-// the box for a "done" column, otherwise unchecking it and setting the column's
-// status tag. It returns the rewritten line, or ok=false if line is not a task
-// or the column is unknown.
-func applyColumn(b BoardConfig, line, toColumnID string) (string, bool) {
-	m := taskLineRe.FindStringSubmatch(line)
+// --- rich task parsing ------------------------------------------------------
+//
+// A task can carry an indented "detail block" directly under its checkbox line:
+// metadata bullets ("- due: ...", "- status: ...", "- tags: [a, b]"), nested
+// step checkboxes, and a description (a "notes: |" block scalar or a fenced code
+// block). The markdown stays the source of truth and renders natively.
+
+var (
+	fenceRe    = regexp.MustCompile("^([`~]{3,})")
+	metaLineRe = regexp.MustCompile(`^\s*[-*+]\s+([A-Za-z][A-Za-z0-9_]*)\s*:\s?(.*)$`)
+)
+
+// fenceMarker returns the opening fence run ("```" / "~~~...") of a trimmed line,
+// or "" when the line does not open a fenced code block.
+func fenceMarker(trimmed string) string { return fenceRe.FindString(trimmed) }
+
+// indentWidth returns a line's visual indent, tabs expanded to 4 columns.
+func indentWidth(line string) int {
+	w := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			w++
+		case '\t':
+			w += 4
+		default:
+			return w
+		}
+	}
+	return w
+}
+
+// stripIndent removes up to n columns of leading whitespace from line.
+func stripIndent(line string, n int) string {
+	i, removed := 0, 0
+	for i < len(line) && removed < n {
+		switch line[i] {
+		case ' ':
+			removed++
+		case '\t':
+			removed += 4
+		default:
+			return line[i:]
+		}
+		i++
+	}
+	return line[i:]
+}
+
+// parseTagsList parses `[a, b, c]` (or a bare comma list) into trimmed tags.
+func parseTagsList(val string) []string {
+	val = strings.TrimSpace(val)
+	val = strings.TrimPrefix(val, "[")
+	val = strings.TrimSuffix(val, "]")
+	var out []string
+	for _, p := range strings.Split(val, ",") {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// detailBlockRange returns [start,end) line indices of the indented detail block
+// under the card at cardIdx: contiguous lines more indented than the card, with
+// fenced code blocks kept whole even when their content dedents.
+func detailBlockRange(lines []string, cardIdx int) (int, int) {
+	cardIndent := indentWidth(lines[cardIdx])
+	start := cardIdx + 1
+	j := start
+	inFence := false
+	marker := ""
+	for j < len(lines) {
+		trimmed := strings.TrimSpace(lines[j])
+		if inFence {
+			if trimmed == marker {
+				inFence = false
+			}
+			j++
+			continue
+		}
+		if trimmed == "" {
+			k := j + 1
+			for k < len(lines) && strings.TrimSpace(lines[k]) == "" {
+				k++
+			}
+			if k >= len(lines) || indentWidth(lines[k]) <= cardIndent {
+				break
+			}
+			j++
+			continue
+		}
+		if indentWidth(lines[j]) <= cardIndent {
+			break
+		}
+		if fm := fenceMarker(trimmed); fm != "" {
+			inFence, marker = true, fm
+		}
+		j++
+	}
+	return start, j
+}
+
+// parseNoteTasks aggregates the task-list items of one note. A checkbox that is
+// not nested in another task's detail block is a card; any checkbox inside a
+// detail block is a step of that card. Fenced code blocks are opaque (their
+// "- [ ]" lines are not tasks).
+func parseNoteTasks(fp string, data []byte, board BoardConfig) []Task {
+	lines := strings.Split(string(data), "\n")
+	var tasks []Task
+	i := 0
+	inFence := false
+	marker := ""
+	for i < len(lines) {
+		trimmed := strings.TrimSpace(lines[i])
+		if inFence {
+			if trimmed == marker {
+				inFence = false
+			}
+			i++
+			continue
+		}
+		if fm := fenceMarker(trimmed); fm != "" {
+			inFence, marker = true, fm
+			i++
+			continue
+		}
+		checked, rest, ok := parseTaskLine(lines[i])
+		if !ok {
+			i++
+			continue
+		}
+		start, end := detailBlockRange(lines, i)
+		tasks = append(tasks, parseCard(fp, lines, i, checked, rest, start, end, board))
+		i = end
+	}
+	return tasks
+}
+
+// parseCard builds one Task from its checkbox line and its detail block.
+func parseCard(fp string, lines []string, cardIdx int, checked bool, rest string, start, end int, board BoardConfig) Task {
+	t := Task{Path: fp, Line: cardIdx + 1, Raw: lines[cardIdx], Checked: checked}
+	var fenceNotes []string
+	inFence := false
+	marker := ""
+	fenceIndent := 0
+	for j := start; j < end; j++ {
+		bl := lines[j]
+		trimmed := strings.TrimSpace(bl)
+		if inFence {
+			if trimmed == marker {
+				inFence = false
+			} else {
+				fenceNotes = append(fenceNotes, stripIndent(bl, fenceIndent))
+			}
+			continue
+		}
+		if fm := fenceMarker(trimmed); fm != "" {
+			inFence, marker, fenceIndent = true, fm, indentWidth(bl)
+			continue
+		}
+		if sc, srest, isTask := parseTaskLine(bl); isTask {
+			t.Steps = append(t.Steps, Step{Text: strings.TrimSpace(srest), Checked: sc, Line: j + 1, Raw: bl})
+			continue
+		}
+		m := metaLineRe.FindStringSubmatch(bl)
+		if m == nil {
+			continue
+		}
+		key, val := strings.ToLower(m[1]), strings.TrimSpace(m[2])
+		switch key {
+		case "status":
+			t.Status = val
+		case "due":
+			t.Due = val
+		case "priority":
+			t.Priority = val
+		case "workload":
+			t.Workload = val
+		case "tags":
+			t.Tags = parseTagsList(val)
+		case "defaultexpanded":
+			t.DefaultExpanded = val == "true" || val == "yes"
+		case "notes":
+			if val == "|" || val == "" {
+				ni := indentWidth(bl)
+				var nl []string
+				for j+1 < end {
+					if strings.TrimSpace(lines[j+1]) == "" {
+						nl = append(nl, "")
+						j++
+						continue
+					}
+					if indentWidth(lines[j+1]) <= ni {
+						break
+					}
+					nl = append(nl, stripIndent(lines[j+1], ni+2))
+					j++
+				}
+				t.Notes = strings.TrimSpace(strings.Join(nl, "\n"))
+			} else {
+				t.Notes = val
+			}
+		}
+	}
+	if t.Notes == "" && len(fenceNotes) > 0 {
+		t.Notes = strings.TrimRight(strings.Join(fenceNotes, "\n"), "\n")
+	}
+	t.Text = strings.TrimSpace(stripStatusTags(board, rest))
+	t.ID = taskID(fp, t.Text)
+	t.Column = columnFor(board, checked, t.Status, rest)
+	return t
+}
+
+// statusFieldLine returns the index of a "- status:" line within [start,end),
+// or -1 when the detail block has none.
+func statusFieldLine(lines []string, start, end int) int {
+	for j := start; j < end; j++ {
+		if m := metaLineRe.FindStringSubmatch(lines[j]); m != nil && strings.EqualFold(m[1], "status") {
+			return j
+		}
+	}
+	return -1
+}
+
+// applyColumnRich moves the card at cardIdx into a column by rewriting its
+// checkbox (checked iff the column is Done) and its `status:` field: for a
+// non-done column the field is updated or inserted at the top of the detail
+// block (materialising one for a simple task); for the Done column a now-stale
+// status field is removed. It returns the updated lines and ok=false when the
+// line is not a task or the column is unknown.
+func applyColumnRich(lines []string, cardIdx int, b BoardConfig, colID string) ([]string, bool) {
+	m := taskLineRe.FindStringSubmatch(lines[cardIdx])
 	if m == nil {
-		return line, false
+		return lines, false
 	}
 	var target *BoardColumn
 	for i := range b.Columns {
-		if b.Columns[i].ID == toColumnID {
+		if b.Columns[i].ID == colID {
 			target = &b.Columns[i]
 			break
 		}
 	}
 	if target == nil {
-		return line, false
+		return lines, false
 	}
 	indent, bullet, rest := m[1], m[2], m[4]
-	stripped := stripStatusTags(b, rest)
 	box := " "
 	if target.Done {
 		box = "x"
-	} else if target.Tag != "" {
-		if stripped != "" {
-			stripped += " "
-		}
-		stripped += "#" + target.Tag
 	}
-	return indent + bullet + " [" + box + "] " + stripped, true
+	lines[cardIdx] = indent + bullet + " [" + box + "] " + stripStatusTags(b, rest)
+
+	start, end := detailBlockRange(lines, cardIdx)
+	sl := statusFieldLine(lines, start, end)
+	if target.Done {
+		if sl >= 0 {
+			lines = append(lines[:sl], lines[sl+1:]...)
+		}
+		return lines, true
+	}
+	value := target.statusValue()
+	if sl >= 0 {
+		lead := lines[sl][:len(lines[sl])-len(strings.TrimLeft(lines[sl], " \t"))]
+		lines[sl] = lead + "- status: " + value
+		return lines, true
+	}
+	child := strings.Repeat(" ", indentWidth(lines[cardIdx])+2) + "- status: " + value
+	at := cardIdx + 1
+	lines = append(lines[:at], append([]string{child}, lines[at:]...)...)
+	return lines, true
 }
 
 // setChecked flips the checkbox on a task line.
@@ -281,23 +572,7 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
-			var local []Task
-			for i, line := range strings.Split(string(data), "\n") {
-				checked, rest, ok := parseTaskLine(line)
-				if !ok {
-					continue
-				}
-				text := stripStatusTags(board, rest)
-				local = append(local, Task{
-					ID:      taskID(fp, text),
-					Path:    fp,
-					Line:    i + 1,
-					Raw:     line,
-					Text:    strings.TrimSpace(text),
-					Checked: checked,
-					Column:  resolveColumn(board, checked, rest),
-				})
-			}
+			local := parseNoteTasks(fp, data, board)
 			if len(local) > 0 {
 				mu.Lock()
 				tasks = append(tasks, local...)
@@ -353,37 +628,44 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	board := h.loadBoard(ctx, ns)
-	var newLine string
 	if mut.ToColumn != "" {
-		newLine, ok = applyColumn(board, lines[mut.Line-1], mut.ToColumn)
-		if !ok {
+		var ok2 bool
+		lines, ok2 = applyColumnRich(lines, mut.Line-1, board, mut.ToColumn)
+		if !ok2 {
 			http.Error(w, `{"error":"unknown column or not a task"}`, http.StatusBadRequest)
 			return
 		}
 	} else {
-		newLine, ok = setChecked(lines[mut.Line-1], *mut.Checked)
-		if !ok {
+		newLine, ok2 := setChecked(lines[mut.Line-1], *mut.Checked)
+		if !ok2 {
 			http.Error(w, `{"error":"not a task"}`, http.StatusBadRequest)
 			return
 		}
+		lines[mut.Line-1] = newLine
 	}
-	lines[mut.Line-1] = newLine
-	if err := h.store.WriteFile(ctx, ns, relPath, []byte(strings.Join(lines, "\n"))); err != nil {
+	newData := []byte(strings.Join(lines, "\n"))
+	if err := h.store.WriteFile(ctx, ns, relPath, newData); err != nil {
 		http.Error(w, `{"error":"failed to write note"}`, http.StatusInternalServerError)
 		return
 	}
 
-	checked, rest, _ := parseTaskLine(newLine)
-	text := stripStatusTags(board, rest)
+	// Return the updated card (rich) when the mutated line is a top-level task;
+	// for a step toggle, return the updated line so the client can reconcile.
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(Task{
-		ID:      taskID(relPath, text),
-		Path:    relPath,
-		Line:    mut.Line,
-		Raw:     newLine,
-		Text:    strings.TrimSpace(text),
-		Checked: checked,
-		Column:  resolveColumn(board, checked, rest),
+	for _, tk := range parseNoteTasks(relPath, newData, board) {
+		if tk.Line == mut.Line {
+			json.NewEncoder(w).Encode(tk)
+			return
+		}
+	}
+	checked, rest, _ := parseTaskLine(lines[mut.Line-1])
+	json.NewEncoder(w).Encode(map[string]any{
+		"path":    relPath,
+		"line":    mut.Line,
+		"raw":     lines[mut.Line-1],
+		"checked": checked,
+		"text":    strings.TrimSpace(stripStatusTags(board, rest)),
+		"step":    true,
 	})
 }
 

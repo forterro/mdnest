@@ -305,3 +305,59 @@
 @media (max-width: 640px) {
   .tb-column { flex-basis: 82vw; }
 }
+
+/* --- rich task card --------------------------------------------------- */
+.tb-card-head { display: flex; align-items: center; gap: 6px; cursor: grab; }
+.tb-card.dragging .tb-card-head, .tb-card-head:active { cursor: grabbing; }
+.tb-card-head .tb-card-text { flex: 1 1 auto; }
+
+.tb-pri {
+  flex: 0 0 auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #11111b;
+  background: #a6adc8;
+}
+.tb-pri-high { background: #f38ba8; }
+.tb-pri-medium, .tb-pri-med { background: #fab387; }
+.tb-pri-low { background: #a6e3a1; }
+
+.tb-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #a6adc8;
+}
+.tb-chip, .tb-due { background: #181825; border: 1px solid #313244; border-radius: 4px; padding: 1px 6px; }
+.tb-due.overdue { color: #f38ba8; border-color: #f38ba8; }
+
+.tb-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.tb-tag { font-size: 10px; color: #89b4fa; background: #1e2030; border: 1px solid #313244; border-radius: 10px; padding: 1px 7px; }
+
+.tb-progress { height: 4px; background: #313244; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.tb-progress-bar { height: 100%; background: #89b4fa; transition: width 0.15s ease; }
+
+.tb-card-detail { margin-top: 8px; border-top: 1px solid #313244; padding-top: 6px; }
+.tb-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.tb-steps li { font-size: 12px; color: #cdd6f4; }
+.tb-steps li.checked span { text-decoration: line-through; color: #6c7086; }
+.tb-steps label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.tb-steps input { accent-color: #89b4fa; }
+.tb-notes { margin-top: 6px; font-size: 11px; color: #a6adc8; white-space: pre-wrap; word-break: break-word; }
+
+.tb-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.tb-expand {
+  background: none;
+  border: none;
+  color: #89b4fa;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.tb-expand:hover { text-decoration: underline; }

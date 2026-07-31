@@ -19,32 +19,88 @@ function cardKey(t) {
   return `${t.path}\u0000${t.line}`;
 }
 
-function TaskCard({ task, canWrite, onOpen }) {
+const today = () => new Date().toISOString().slice(0, 10);
+
+function TaskCard({ task, canWrite, onOpen, onToggleStep }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
     disabled: !canWrite,
   });
+  const [expanded, setExpanded] = useState(!!task.defaultExpanded);
+  const steps = task.steps || [];
+  const done = steps.filter((s) => s.checked).length;
+  const hasDetail = steps.length > 0 || !!task.notes;
+  const overdue = task.due && !task.checked && task.due < today();
+  const noSwallow = (e) => e.stopPropagation();
+
   return (
-    <div
-      ref={setNodeRef}
-      className={`tb-card${isDragging ? ' dragging' : ''}${task.checked ? ' checked' : ''}`}
-      {...(canWrite ? { ...attributes, ...listeners } : {})}
-    >
-      <div className="tb-card-text">{task.text || <em>(empty)</em>}</div>
-      <button
-        type="button"
-        className="tb-card-source"
-        title={`Open ${task.path}`}
-        onClick={(e) => { e.stopPropagation(); onOpen(task.path); }}
-      >
-        {task.path}
-      </button>
+    <div className={`tb-card${isDragging ? ' dragging' : ''}${task.checked ? ' checked' : ''}`} ref={setNodeRef}>
+      {/* The head is the drag handle; interactive controls below stop propagation. */}
+      <div className="tb-card-head" {...(canWrite ? { ...attributes, ...listeners } : {})}>
+        {task.priority && (
+          <span className={`tb-pri tb-pri-${String(task.priority).toLowerCase()}`}>{task.priority}</span>
+        )}
+        <span className="tb-card-text">{task.text || <em>(empty)</em>}</span>
+      </div>
+
+      {(task.due || task.workload || steps.length > 0) && (
+        <div className="tb-card-meta">
+          {task.due && <span className={`tb-due${overdue ? ' overdue' : ''}`} title="Due date">📅 {task.due}</span>}
+          {task.workload && <span className="tb-chip" title="Workload">🏋 {task.workload}</span>}
+          {steps.length > 0 && <span className="tb-chip" title="Steps done">☑ {done}/{steps.length}</span>}
+        </div>
+      )}
+
+      {task.tags && task.tags.length > 0 && (
+        <div className="tb-tags">{task.tags.map((t) => <span key={t} className="tb-tag">{t}</span>)}</div>
+      )}
+
+      {steps.length > 0 && (
+        <div className="tb-progress"><div className="tb-progress-bar" style={{ width: `${(done / steps.length) * 100}%` }} /></div>
+      )}
+
+      {expanded && (
+        <div className="tb-card-detail">
+          {steps.length > 0 && (
+            <ul className="tb-steps">
+              {steps.map((s) => (
+                <li key={s.line} className={s.checked ? 'checked' : ''}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={s.checked}
+                      disabled={!canWrite}
+                      onPointerDown={noSwallow}
+                      onChange={() => onToggleStep(task, s)}
+                    />
+                    <span>{s.text || <em>(empty)</em>}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+          {task.notes && <div className="tb-notes">{task.notes}</div>}
+        </div>
+      )}
+
+      <div className="tb-card-foot">
+        {hasDetail && (
+          <button type="button" className="tb-expand" onPointerDown={noSwallow}
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}>
+            {expanded ? '▾ less' : '▸ more'}
+          </button>
+        )}
+        <button type="button" className="tb-card-source" title={`Open ${task.path}`} onPointerDown={noSwallow}
+          onClick={(e) => { e.stopPropagation(); onOpen(task.path); }}>
+          {task.path}
+        </button>
+      </div>
     </div>
   );
 }
 
-function BoardColumn({ column, tasks, canWrite, onOpen }) {
+function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   return (
     <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}`}>
@@ -54,7 +110,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen }) {
       </div>
       <div className="tb-column-body">
         {tasks.map((t) => (
-          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} />
+          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} />
         ))}
         {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
       </div>
@@ -121,6 +177,28 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
       setError(e.message);
     }
   }, [ns, applyUpdated, reload]);
+
+  // Toggle a sub-task (step): flip its checkbox line. Optimistic, reconciled
+  // from the step ack the backend returns (keeps the step's raw line fresh).
+  const handleToggleStep = useCallback(async (task, step) => {
+    const key = cardKey(task);
+    setTasks((cur) => cur.map((t) => (cardKey(t) === key
+      ? { ...t, steps: t.steps.map((s) => (s.line === step.line ? { ...s, checked: !s.checked } : s)) }
+      : t)));
+    try {
+      const res = await patchTask(ns, task.path, { line: step.line, raw: step.raw, checked: !step.checked });
+      if (res && res.step) {
+        setTasks((cur) => cur.map((t) => (cardKey(t) === key
+          ? { ...t, steps: t.steps.map((s) => (s.line === step.line ? { ...s, checked: res.checked, raw: res.raw } : s)) }
+          : t)));
+      } else {
+        await reload();
+      }
+    } catch (e) {
+      if (e.status === 409) { await reload(); return; }
+      setError(e.message); await reload();
+    }
+  }, [ns, reload]);
 
   const handleDragStart = useCallback((event) => {
     setActiveTask(event.active?.data?.current?.task || null);
@@ -210,6 +288,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose }) {
                 tasks={tasksByColumn[col.id] || []}
                 canWrite={canWrite}
                 onOpen={onOpenNote}
+                onToggleStep={handleToggleStep}
               />
             ))}
           </div>

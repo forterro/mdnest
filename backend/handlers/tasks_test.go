@@ -1,6 +1,9 @@
 package handlers
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseTaskLine(t *testing.T) {
 	cases := []struct {
@@ -65,11 +68,11 @@ func TestResolveColumn(t *testing.T) {
 		rest    string
 		want    string
 	}{
-		{false, "no tag", "todo"},         // default first non-done column
-		{false, "work #doing", "doing"},   // explicit tag
-		{false, "planned #todo", "todo"},  // explicit todo tag
-		{true, "anything", "done"},        // checked always maps to done column
-		{true, "checked #doing", "done"},  // checked wins over stale tag
+		{false, "no tag", "todo"},        // default first non-done column
+		{false, "work #doing", "doing"},  // explicit tag
+		{false, "planned #todo", "todo"}, // explicit todo tag
+		{true, "anything", "done"},       // checked always maps to done column
+		{true, "checked #doing", "done"}, // checked wins over stale tag
 	}
 	for _, c := range cases {
 		if got := resolveColumn(b, c.checked, c.rest); got != c.want {
@@ -78,35 +81,93 @@ func TestResolveColumn(t *testing.T) {
 	}
 }
 
-func TestApplyColumn(t *testing.T) {
+func TestApplyColumnRich(t *testing.T) {
 	b := defaultBoard()
 
-	// To a done column: check the box and drop status tags.
-	got, ok := applyColumn(b, "- [ ] ship it #doing", "done")
-	if !ok || got != "- [x] ship it" {
-		t.Errorf("applyColumn done = (%q,%v)", got, ok)
+	// Simple task moved to a non-done column: materialise a status field.
+	out, ok := applyColumnRich([]string{"- [ ] ship it"}, 0, b, "doing")
+	if !ok || len(out) != 2 || out[0] != "- [ ] ship it" || out[1] != "  - status: doing" {
+		t.Fatalf("apply doing = %#v ok=%v", out, ok)
 	}
 
-	// To a non-done column: uncheck and set the column tag.
-	got, ok = applyColumn(b, "- [x] revert this", "doing")
-	if !ok || got != "- [ ] revert this #doing" {
-		t.Errorf("applyColumn doing = (%q,%v)", got, ok)
+	// Moved to the done column: check the box and drop a stale status field.
+	out, ok = applyColumnRich([]string{"- [ ] ship it", "  - status: doing"}, 0, b, "done")
+	if !ok || len(out) != 1 || out[0] != "- [x] ship it" {
+		t.Fatalf("apply done = %#v ok=%v", out, ok)
 	}
 
-	// Between non-done columns: swap the tag, preserve indent/bullet.
-	got, ok = applyColumn(b, "  * [ ] nested #doing", "todo")
-	if !ok || got != "  * [ ] nested #todo" {
-		t.Errorf("applyColumn swap = (%q,%v)", got, ok)
+	// Existing status field is updated in place, keeping the block.
+	out, ok = applyColumnRich([]string{"- [ ] task", "  - status: todo"}, 0, b, "doing")
+	if !ok || len(out) != 2 || out[1] != "  - status: doing" {
+		t.Fatalf("apply update = %#v ok=%v", out, ok)
 	}
 
-	// Unknown column is rejected.
-	if _, ok := applyColumn(b, "- [ ] x", "missing"); ok {
-		t.Error("expected unknown column to fail")
+	// Unknown column and non-task line are rejected.
+	if _, ok := applyColumnRich([]string{"- [ ] x"}, 0, b, "missing"); ok {
+		t.Error("unknown column should fail")
 	}
+	if _, ok := applyColumnRich([]string{"plain"}, 0, b, "todo"); ok {
+		t.Error("non-task should fail")
+	}
+}
 
-	// Non-task line is rejected.
-	if _, ok := applyColumn(b, "plain text", "todo"); ok {
-		t.Error("expected non-task line to fail")
+func TestParseNoteTasks(t *testing.T) {
+	b := defaultBoard()
+	note := strings.Join([]string{
+		"# Notes",
+		"- [ ] Design UI",
+		"  - status: doing",
+		"  - due: 2024-01-15",
+		"  - priority: high",
+		"  - tags: [design, ui]",
+		"  - steps:",
+		"    - [x] Wireframes",
+		"    - [ ] Visual design",
+		"  - notes: |",
+		"    Login & registration",
+		"    - responsive",
+		"- [ ] Simple task",
+		"```",
+		"- [ ] not a task (fenced)",
+		"```",
+	}, "\n")
+	tasks := parseNoteTasks("plan.md", []byte(note), b)
+	if len(tasks) != 2 {
+		t.Fatalf("want 2 cards, got %d: %+v", len(tasks), tasks)
+	}
+	d := tasks[0]
+	if d.Text != "Design UI" || d.Status != "doing" || d.Column != "doing" {
+		t.Errorf("card0 meta wrong: %+v", d)
+	}
+	if d.Due != "2024-01-15" || d.Priority != "high" || len(d.Tags) != 2 {
+		t.Errorf("card0 fields wrong: %+v", d)
+	}
+	if len(d.Steps) != 2 || !d.Steps[0].Checked || d.Steps[1].Checked {
+		t.Errorf("steps wrong: %+v", d.Steps)
+	}
+	if !strings.Contains(d.Notes, "Login & registration") || !strings.Contains(d.Notes, "- responsive") {
+		t.Errorf("notes wrong: %q", d.Notes)
+	}
+	if tasks[1].Text != "Simple task" || len(tasks[1].Steps) != 0 {
+		t.Errorf("card1 wrong: %+v", tasks[1])
+	}
+}
+
+func TestParseNoteTasksFencedDescription(t *testing.T) {
+	b := defaultBoard()
+	note := strings.Join([]string{
+		"- [ ] With fenced notes",
+		"  ```md",
+		"  Some description",
+		"  - a bullet",
+		"  ```",
+	}, "\n")
+	tasks := parseNoteTasks("n.md", []byte(note), b)
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 card, got %d", len(tasks))
+	}
+	if !strings.Contains(tasks[0].Notes, "Some description") || len(tasks[0].Steps) != 0 {
+		t.Errorf("fenced notes wrong: notes=%q steps=%+v", tasks[0].Notes, tasks[0].Steps)
 	}
 }
 
