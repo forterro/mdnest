@@ -23,7 +23,7 @@ function render(content) {
   return { slides: slides.length ? slides : [html], css };
 }
 
-export default function MarpDeck({ content }) {
+export default function MarpDeck({ content, scrollPct }) {
   const { slides, css, error } = useMemo(() => {
     try {
       return render(content);
@@ -36,6 +36,16 @@ export default function MarpDeck({ content }) {
   const [idx, setIdx] = useState(0);
   const clamp = useCallback((i) => Math.max(0, Math.min(total - 1, i)), [total]);
   useEffect(() => { setIdx((i) => clamp(i)); }, [total, clamp]);
+
+  // Follow the editor's position in split view: the deck isn't scrollable, so
+  // the parent hands us the editor's 0..1 scroll ratio and we map it to a
+  // slide. Manual navigation (arrows/keys/buttons) still works — the next
+  // editor scroll simply re-syncs. Ignored when the parent passes nothing
+  // (fullscreen, mobile, or preview-only where there is no editor to track).
+  useEffect(() => {
+    if (typeof scrollPct !== 'number' || total <= 1) return;
+    setIdx(clamp(Math.round(scrollPct * (total - 1))));
+  }, [scrollPct, total, clamp]);
 
   const rootRef = useRef(null);
   const go = useCallback((delta) => setIdx((i) => clamp(i + delta)), [clamp]);
