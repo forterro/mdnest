@@ -1,7 +1,7 @@
 {
   "name": "mdnest-frontend",
   "private": true,
-  "version": "3.12.0-forterro.22",
+  "version": "3.12.0-forterro.23",
   "type": "module",
   "scripts": {
     "dev": "vite",
