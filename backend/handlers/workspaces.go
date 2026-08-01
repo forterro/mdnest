@@ -89,7 +89,7 @@ func (h *WorkspaceHandler) requireEncryptionForCredential(cred *string) error {
 }
 
 // personalNamespace resolves the caller's personal-workspace namespace: their
-// email address, so it is recognisable (not an opaque user-<id>).
+// email address, so it is recognisable.
 func (h *WorkspaceHandler) personalNamespace(userID int) (string, error) {
 	if h.users == nil {
 		return "", errors.New("user lookup unavailable")
@@ -192,10 +192,6 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 	ns := strings.TrimSpace(req.Namespace)
 	if !namespacePattern.MatchString(ns) {
 		wsError(w, http.StatusBadRequest, "invalid namespace (allowed: letters, digits, . _ -)")
-		return
-	}
-	if strings.HasPrefix(ns, "user-") {
-		wsError(w, http.StatusBadRequest, "the user- prefix is reserved for personal workspaces")
 		return
 	}
 	if existing, _ := h.store.GetByNamespace(ns); existing != nil {
@@ -339,7 +335,7 @@ type groupRequest struct {
 func (h *WorkspaceHandler) HandleGroups(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.groupsList(w)
+		h.groupsList(w, r)
 	case http.MethodPost:
 		h.groupsCreate(w, r)
 	case http.MethodPut:
@@ -351,13 +347,65 @@ func (h *WorkspaceHandler) HandleGroups(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (h *WorkspaceHandler) groupsList(w http.ResponseWriter) {
+func (h *WorkspaceHandler) groupsList(w http.ResponseWriter, r *http.Request) {
 	list, err := h.store.ListGroups()
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "failed to list groups")
 		return
 	}
+	// A provisioned group represents the env-default mirror (GIT_REMOTE_URL):
+	// every existing namespace with no explicit workspace row mirrors under its
+	// base as <base>/<ns>.git, so surface those as its (read-only) projects.
+	var implicit []string
+	computed := false
+	for i := range list {
+		if !list[i].IsProvisioned() {
+			continue
+		}
+		if !computed {
+			implicit = h.provisionedImplicitNamespaces(r.Context())
+			computed = true
+		}
+		list[i].ImplicitNamespaces = implicit
+	}
 	wsJSON(w, http.StatusOK, list)
+}
+
+// provisionedImplicitNamespaces lists the existing namespaces that mirror under
+// the env-default base (the provisioned group) but have no explicit workspace
+// row. Personal namespaces are excluded — they are self-managed by their owner
+// and never administered here — matching the management-plane namespace list.
+// Best-effort: returns nil on any lookup error.
+func (h *WorkspaceHandler) provisionedImplicitNamespaces(ctx context.Context) []string {
+	if h.stg == nil {
+		return nil
+	}
+	names, err := h.stg.ListNamespaces(ctx)
+	if err != nil {
+		return nil
+	}
+	rows, err := h.store.List()
+	if err != nil {
+		return nil
+	}
+	excluded := make(map[string]bool, len(rows))
+	for _, ws := range rows {
+		excluded[ws.Namespace] = true
+	}
+	if personal, err := h.store.PersonalNamespaces(); err == nil {
+		for _, p := range personal {
+			excluded[p] = true
+		}
+	}
+	implicit := make([]string, 0)
+	for _, ns := range names {
+		if excluded[ns] {
+			continue
+		}
+		implicit = append(implicit, ns)
+	}
+	slices.Sort(implicit)
+	return implicit
 }
 
 func (h *WorkspaceHandler) groupsCreate(w http.ResponseWriter, r *http.Request) {
@@ -558,12 +606,6 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "lookup failed")
 		return
-	}
-	// If the naming scheme changed (an older user-<id> row), replace it so the
-	// personal workspace is keyed by the email going forward.
-	if existing != nil && existing.Namespace != ns {
-		_, _ = h.store.Delete(existing.ID)
-		existing = nil
 	}
 	if err := h.requireEncryptionForMirror(in.GitEnabled); err != nil {
 		wsError(w, http.StatusForbidden, err.Error())

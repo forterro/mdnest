@@ -29,6 +29,10 @@ type WorkspaceGroup struct {
 	WorkspaceCount int       `json:"workspace_count"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// ImplicitNamespaces is populated by the handler (never stored/scanned): for
+	// a provisioned group it lists existing namespaces that mirror under its base
+	// via the env default but have no explicit workspace row.
+	ImplicitNamespaces []string `json:"implicit_namespaces,omitempty"`
 }
 
 // IsProvisioned reports whether the group is operator-owned (env-reconciled) and
@@ -190,15 +194,7 @@ func (s *PostgresWorkspaceStore) CreateInGroup(groupID int, namespace string, gi
 }
 
 func normalizeGroup(in WorkspaceGroupInput) WorkspaceGroupInput {
-	if in.Transport = strings.ToLower(strings.TrimSpace(in.Transport)); in.Transport != "ssh" {
-		in.Transport = "https"
-	}
-	if strings.TrimSpace(in.Username) == "" {
-		in.Username = "oauth2"
-	}
-	if strings.TrimSpace(in.Branch) == "" {
-		in.Branch = "main"
-	}
+	in.Transport, in.Username, in.Branch = normalizeGitDefaults(in.Transport, in.Username, in.Branch)
 	in.BaseURL = strings.TrimSpace(in.BaseURL)
 	return in
 }
@@ -221,18 +217,7 @@ func scanGroup(row rowScanner) (WorkspaceGroup, error) {
 // token at boot never wipes a previously-sealed one). A name that already exists
 // as a 'ui' group is taken over as provisioned — provisioned config wins.
 func (s *PostgresWorkspaceStore) EnsureProvisionedGroup(spec ProvisionedGroupSpec) (*WorkspaceGroup, error) {
-	transport := strings.ToLower(strings.TrimSpace(spec.Transport))
-	if transport != "ssh" {
-		transport = "https"
-	}
-	username := strings.TrimSpace(spec.Username)
-	if username == "" {
-		username = "oauth2"
-	}
-	branch := strings.TrimSpace(spec.Branch)
-	if branch == "" {
-		branch = "main"
-	}
+	transport, username, branch := normalizeGitDefaults(spec.Transport, spec.Username, spec.Branch)
 	baseURL := strings.TrimRight(strings.TrimSpace(spec.BaseURL), "/")
 	enc := ""
 	if spec.Credential != "" {
@@ -262,6 +247,14 @@ func (s *PostgresWorkspaceStore) EnsureProvisionedGroup(spec ProvisionedGroupSpe
 		strings.TrimSpace(spec.Name), transport, baseURL, username, branch, enc,
 	).Scan(&id)
 	if err != nil {
+		return nil, err
+	}
+	// Keep a single provisioned group: if the operator renamed it
+	// (GIT_PROVISIONED_GROUP_NAME) the stale row would otherwise linger as an
+	// undeletable orphan, so drop any other provisioned group here.
+	if _, err := s.db.Exec(
+		`DELETE FROM workspace_groups WHERE source = 'provisioned' AND id <> $1`, id,
+	); err != nil {
 		return nil, err
 	}
 	return s.GetGroup(id)

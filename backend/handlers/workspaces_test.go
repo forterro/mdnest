@@ -46,6 +46,7 @@ func (f *fakeWSStore) RemoteForNamespace(string) (*store.WorkspaceRemote, error)
 	return nil, nil
 }
 func (f *fakeWSStore) SetSyncStatus(string, string) error          { return nil }
+func (f *fakeWSStore) PersonalNamespaces() ([]string, error)       { return nil, nil }
 func (f *fakeWSStore) ListGroups() ([]store.WorkspaceGroup, error) { return nil, nil }
 func (f *fakeWSStore) GetGroup(id int) (*store.WorkspaceGroup, error) {
 	return f.groups[id], nil
@@ -210,18 +211,6 @@ func TestGroupCreateFailsClosedWithoutEncryption(t *testing.T) {
 	h.HandleGroups(w, r)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (encryption not configured)", w.Code)
-	}
-}
-
-func TestAdminCreateRejectsReservedPrefix(t *testing.T) {
-	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
-	body := `{"namespace":"user-1","git_enabled":false}`
-	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.HandleAdmin(w, r)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for reserved user- prefix", w.Code)
 	}
 }
 

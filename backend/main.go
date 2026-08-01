@@ -425,7 +425,7 @@ func main() {
 		log.Println("live collaboration enabled (WebSocket)")
 	}
 
-	nsHandler := handlers.NewNamespaceHandler(stg, perms)
+	nsHandler := handlers.NewNamespaceHandler(stg, perms, workspaceStore)
 	noteHandler := handlers.NewNoteHandler(stg)
 	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
