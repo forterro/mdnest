@@ -1,19 +1,20 @@
 // MarpDeck — renders a Marp-format note as a paginated slide deck.
 //
-// The markdown is rendered with the official Marp engine. Two safety choices:
-//   - `html: false` so raw HTML in the note is escaped (no <script>/<img onerror>),
-//   - `script: false` so Marp injects no runtime script,
-// and each slide is displayed inside a fully **sandboxed iframe** (no scripts,
-// no same-origin) so neither the note's content nor the theme CSS can touch the
-// rest of the app. The engine is imported here so it only loads when a Marp note
-// is opened with the feature enabled (the parent lazy-loads this component).
+// Each slide is displayed inside a fully **sandboxed iframe** (`sandbox=""`: no
+// scripts, no same-origin, opaque origin) — that is the security boundary, so no
+// markup in the note can run script or reach the app. Because of the sandbox we
+// can safely enable inline HTML (`html: true`) — Marp decks commonly use
+// <div class="…"> layouts and <style> blocks — and we keep `script: false` so
+// Marp injects no runtime of its own. The engine is imported here so it only
+// loads when a Marp note is opened with the feature enabled (the parent
+// lazy-loads this component).
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Marp } from '@marp-team/marp-core';
 import './MarpDeck.css';
 
 // render turns the note into per-slide HTML fragments + the theme CSS.
 function render(content) {
-  const marp = new Marp({ html: false, script: false });
+  const marp = new Marp({ html: true, script: false });
   const { html, css } = marp.render(content);
   // Marp emits one <svg data-marpit-svg> per slide inside a .marpit wrapper.
   const doc = new DOMParser().parseFromString(html, 'text/html');
