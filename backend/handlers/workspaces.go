@@ -31,16 +31,27 @@ type userLookup interface {
 }
 
 // grantWriter ensures a user has an access grant on their personal namespace so
-// the standard grant-based authorization covers it (no special-casing).
+// the standard grant-based authorization covers it (no special-casing). It also
+// revokes every grant on a namespace when a workspace/project is decommissioned.
 type grantWriter interface {
 	GetGrantsForUser(userID int) ([]store.Grant, error)
 	CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*store.Grant, error)
+	DeleteGrantsForNamespace(namespace string) (int64, error)
+}
+
+// namespaceAdminCleaner removes every namespace-admin row for a namespace when a
+// workspace/project is decommissioned, so no orphaned admin rows linger.
+type namespaceAdminCleaner interface {
+	DeleteAllForNamespace(namespace string) (int64, error)
 }
 
 type WorkspaceHandler struct {
 	store  store.WorkspaceStore
 	users  userLookup
 	grants grantWriter
+	// nsAdmins removes namespace-admin rows when a workspace is decommissioned.
+	// nil in single mode.
+	nsAdmins namespaceAdminCleaner
 	// stg materialises a namespace (MkdirAll) when a workspace is configured so
 	// it is listed and writable even before it holds a note. nil in single mode.
 	stg storage.Storage
@@ -66,6 +77,13 @@ func NewWorkspaceHandler(ws store.WorkspaceStore, users userLookup, grants grant
 		}
 	}
 	return &WorkspaceHandler{store: ws, users: users, grants: grants, stg: stg, allowedHosts: lower, encryptionConfigured: encryptionConfigured}
+}
+
+// SetNamespaceAdminCleaner wires the namespace-admin cleanup used when a
+// workspace is decommissioned (multi mode only). Optional: nil leaves
+// namespace-admin rows untouched on delete.
+func (h *WorkspaceHandler) SetNamespaceAdminCleaner(c namespaceAdminCleaner) {
+	h.nsAdmins = c
 }
 
 // requireEncryptionForMirror fails closed when mirroring would seal a credential
@@ -314,7 +332,33 @@ func (h *WorkspaceHandler) adminDelete(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
+	// Decommissioning a project revokes its access metadata so no orphaned
+	// grants / namespace-admins linger (the notes themselves stay in git).
+	if existing != nil {
+		h.revokeNamespaceAccess(existing.Namespace)
+	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// revokeNamespaceAccess removes every access grant and namespace-admin row for a
+// namespace. Best-effort: failures are logged, not fatal (the workspace row is
+// already gone).
+func (h *WorkspaceHandler) revokeNamespaceAccess(ns string) {
+	if ns == "" {
+		return
+	}
+	if h.grants != nil {
+		if n, err := h.grants.DeleteGrantsForNamespace(ns); err != nil {
+			log.Printf("workspaces: could not revoke grants for %q: %v", ns, err)
+		} else if n > 0 {
+			log.Printf("workspaces: revoked %d grant(s) on decommissioned namespace %q", n, ns)
+		}
+	}
+	if h.nsAdmins != nil {
+		if _, err := h.nsAdmins.DeleteAllForNamespace(ns); err != nil {
+			log.Printf("workspaces: could not remove namespace-admins for %q: %v", ns, err)
+		}
+	}
 }
 
 // --- workspace groups: /api/admin/workspace-groups (superadmin) ------------
@@ -496,6 +540,10 @@ func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusForbidden, "this group is provisioned by the deployment (env config) and cannot be deleted; you can only manage its sub-projects")
 		return
 	}
+	// Collect the member namespaces before the group is deleted: DeleteGroup
+	// cascades the member workspace rows at the DB level, so we revoke their
+	// access metadata here rather than losing the chance once they are gone.
+	memberNamespaces := h.groupMemberNamespaces(id)
 	deleted, err := h.store.DeleteGroup(id)
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "failed to delete group")
@@ -505,7 +553,25 @@ func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusNotFound, "group not found")
 		return
 	}
+	for _, ns := range memberNamespaces {
+		h.revokeNamespaceAccess(ns)
+	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// groupMemberNamespaces returns the namespaces of a group's member workspaces.
+func (h *WorkspaceHandler) groupMemberNamespaces(groupID int) []string {
+	all, err := h.store.List()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, ws := range all {
+		if ws.GroupID != nil && *ws.GroupID == groupID {
+			out = append(out, ws.Namespace)
+		}
+	}
+	return out
 }
 
 // groupInputFrom validates and builds a group input. The base URL is validated

@@ -696,7 +696,7 @@ function WorkspacesTab() {
   };
 
   const del = async (w) => {
-    if (!confirm(`Delete the git remote for "${w.namespace}"? Notes stay; mirroring stops.`)) return;
+    if (!confirm(`Delete the git remote for "${w.namespace}"? Notes stay in git; mirroring stops and all access grants + namespace admins for this namespace are revoked.`)) return;
     try {
       await adminDeleteWorkspace(w.id);
       if (editId === w.id) reset();
@@ -867,7 +867,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
   };
 
   const del = async (g) => {
-    if (!confirm(`Delete group "${g.name}"? Its ${g.workspace_count} workspace(s) mirror config is removed (notes stay).`)) return;
+    if (!confirm(`Delete group "${g.name}"? Its ${g.workspace_count} workspace(s) mirror config is removed (notes stay in git); access grants + namespace admins for those namespaces are revoked.`)) return;
     try { await adminDeleteWorkspaceGroup(g.id); if (editId === g.id) reset(); load(); onWorkspacesChanged && onWorkspacesChanged(); }
     catch (e) { setErr(e.message); }
   };
@@ -895,7 +895,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
     } catch (e) { setErr(e.message); }
   };
   const delMember = async (w) => {
-    if (!confirm(`Remove namespace "${w.namespace}" from this group? Notes stay; mirroring stops.`)) return;
+    if (!confirm(`Remove namespace "${w.namespace}" from this group? Notes stay in git; mirroring stops and all access grants + namespace admins for this namespace are revoked.`)) return;
     setErr('');
     try {
       await adminDeleteWorkspace(w.id);
