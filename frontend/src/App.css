@@ -3937,6 +3937,55 @@ pre:hover .code-copy-btn {
   font-style: italic;
 }
 
+/* Git Workspaces help block. Kept narrow and structured so it reads as a short
+   legend instead of a full-width wall of text. */
+.admin-description {
+  max-width: 820px;
+  margin: 0 0 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #a6adc8;
+}
+.admin-description p {
+  margin: 0 0 0.5rem;
+}
+.admin-description ul {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.admin-description li {
+  position: relative;
+  padding-left: 0.95rem;
+}
+.admin-description li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #585b70;
+}
+.admin-description strong {
+  color: #cdd6f4;
+}
+.admin-description code {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 0.82em;
+  color: #cdd6f4;
+}
+.admin-description-foot {
+  color: #6c7086;
+  font-style: italic;
+}
+
 .admin-filter {
   width: 100%;
   padding: 8px 12px;
