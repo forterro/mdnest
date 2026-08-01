@@ -407,6 +407,10 @@ func (h *WorkspaceHandler) groupsUpdate(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusNotFound, "group not found")
 		return
 	}
+	if existing.IsProvisioned() {
+		wsError(w, http.StatusForbidden, "this group is provisioned by the deployment (env config); you can only manage its sub-projects, not edit the group")
+		return
+	}
 	var req groupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wsError(w, http.StatusBadRequest, "invalid JSON")
@@ -438,6 +442,10 @@ func (h *WorkspaceHandler) groupsUpdate(w http.ResponseWriter, r *http.Request) 
 func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) {
 	id, ok := workspaceID(w, r)
 	if !ok {
+		return
+	}
+	if existing, _ := h.store.GetGroup(id); existing != nil && existing.IsProvisioned() {
+		wsError(w, http.StatusForbidden, "this group is provisioned by the deployment (env config) and cannot be deleted; you can only manage its sub-projects")
 		return
 	}
 	deleted, err := h.store.DeleteGroup(id)

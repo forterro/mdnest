@@ -96,6 +96,9 @@ type WorkspaceStore interface {
 	CreateGroup(in WorkspaceGroupInput) (*WorkspaceGroup, error)
 	UpdateGroup(id int, in WorkspaceGroupInput) (*WorkspaceGroup, error)
 	DeleteGroup(id int) (bool, error)
+	// EnsureProvisionedGroup upserts an operator-declared group (source =
+	// 'provisioned'), reconciled on boot from environment config.
+	EnsureProvisionedGroup(spec ProvisionedGroupSpec) (*WorkspaceGroup, error)
 	// CreateInGroup adds a namespace to a group; it inherits the group's remote.
 	CreateInGroup(groupID int, namespace string, gitEnabled bool) (*Workspace, error)
 }

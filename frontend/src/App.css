@@ -3612,6 +3612,17 @@ pre:hover .code-copy-btn {
   padding: 20px;
 }
 
+/* Git Workspaces tab body. Like .admin-section it must take the remaining
+   column height and scroll its own overflow — without min-height:0 a flex
+   child refuses to shrink and the content spills past the viewport with no
+   scrollbar. */
+.admin-tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+}
+
 .admin-section-header {
   display: flex;
   align-items: center;
