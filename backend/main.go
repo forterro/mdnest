@@ -668,6 +668,7 @@ func main() {
 		// SSRF; the primary control is the writer's egress NetworkPolicy).
 		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, grantStore, stg,
 			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","), encryptionConfigured)
+		workspaceHandler.SetNamespaceAdminCleaner(nsAdminStore)
 		if !encryptionConfigured {
 			log.Println("WARNING: MDNEST_ENCRYPTION_KEY is unset and MDNEST_JWT_SECRET is default — per-workspace git mirroring is disabled (credentials cannot be sealed at rest). Set MDNEST_ENCRYPTION_KEY to enable it.")
 		}

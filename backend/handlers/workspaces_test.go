@@ -16,6 +16,7 @@ type fakeWSStore struct {
 	personal    map[int]*store.Workspace
 	byNS        map[string]*store.Workspace
 	groups      map[int]*store.WorkspaceGroup
+	getResult   *store.Workspace
 	lastCreate  store.WorkspaceInput
 	created     bool
 	inGroupNS   string
@@ -24,7 +25,7 @@ type fakeWSStore struct {
 }
 
 func (f *fakeWSStore) List() ([]store.Workspace, error)  { return nil, nil }
-func (f *fakeWSStore) Get(int) (*store.Workspace, error) { return nil, nil }
+func (f *fakeWSStore) Get(int) (*store.Workspace, error) { return f.getResult, nil }
 func (f *fakeWSStore) GetByNamespace(ns string) (*store.Workspace, error) {
 	return f.byNS[ns], nil
 }
@@ -84,6 +85,7 @@ func (f fakeUsers) GetUserByID(id int) (*store.User, error) {
 type fakeGrants struct {
 	created bool
 	ns      string
+	deleted string
 }
 
 func (f *fakeGrants) GetGrantsForUser(int) ([]store.Grant, error) { return nil, nil }
@@ -91,6 +93,40 @@ func (f *fakeGrants) CreateGrant(userID int, ns, path, perm string, by *int) (*s
 	f.created = true
 	f.ns = ns
 	return &store.Grant{}, nil
+}
+func (f *fakeGrants) DeleteGrantsForNamespace(ns string) (int64, error) {
+	f.deleted = ns
+	return 0, nil
+}
+
+// fakeNsCleaner records the namespace whose admin rows were removed.
+type fakeNsCleaner struct{ deleted string }
+
+func (f *fakeNsCleaner) DeleteAllForNamespace(ns string) (int64, error) {
+	f.deleted = ns
+	return 0, nil
+}
+
+// Deleting a workspace/project revokes every access grant and namespace-admin
+// row on its namespace so no orphaned access metadata lingers.
+func TestAdminDeleteRevokesNamespaceAccess(t *testing.T) {
+	fs := &fakeWSStore{getResult: &store.Workspace{ID: 5, Namespace: "team-x"}}
+	gr := &fakeGrants{}
+	nsa := &fakeNsCleaner{}
+	h := NewWorkspaceHandler(fs, nil, gr, nil, nil, true)
+	h.SetNamespaceAdminCleaner(nsa)
+	r := httptest.NewRequest(http.MethodDelete, "/api/admin/workspaces?id=5", nil)
+	w := httptest.NewRecorder()
+	h.HandleAdmin(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if gr.deleted != "team-x" {
+		t.Fatalf("grants not revoked for namespace: %q", gr.deleted)
+	}
+	if nsa.deleted != "team-x" {
+		t.Fatalf("namespace-admins not revoked: %q", nsa.deleted)
+	}
 }
 
 // A personal-workspace PUT ignores a client-supplied namespace and always
