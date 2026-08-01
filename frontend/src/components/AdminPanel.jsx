@@ -710,12 +710,15 @@ function WorkspacesTab() {
         shared remote base + token once and add namespaces to it (one repo per
         namespace, like the env provisioning), or a <strong>standalone</strong>
         workspace to mirror a single namespace to one specific repository.
-        Credentials are stored encrypted and never shown again. Personal
+        Credentials are stored encrypted and never shown again. A group tagged
+        <span className="admin-scope-badge" style={{ margin: '0 3px' }}>provisioned</span>
+        comes from the deployment config (GIT_REMOTE_URL): you can add or remove
+        its projects, but not edit or delete the group itself. Personal
         workspaces are managed by each user under Settings → Git remote.
       </p>
       {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
 
-      <GroupsSection onWorkspacesChanged={load} />
+      <GroupsSection workspaces={list} onWorkspacesChanged={load} />
 
       <h4 style={{ margin: '1.4rem 0 0.2rem' }}>Standalone workspaces</h4>
       <div className="admin-form" style={{ display: 'grid', gap: '0.4rem', maxWidth: 620 }}>
@@ -752,27 +755,26 @@ function WorkspacesTab() {
       <div style={{ marginTop: '1rem' }}>
         {loading ? (
           <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
-        ) : list.length === 0 ? (
-          <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No workspaces configured.</p>
+        ) : list.filter((w) => !w.group_id).length === 0 ? (
+          <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No standalone workspaces configured.</p>
         ) : (
           <table className="admin-table">
             <thead>
               <tr><th>Namespace</th><th>Transport</th><th>Remote</th><th>Branch</th><th>Cred</th><th>On</th><th></th></tr>
             </thead>
             <tbody>
-              {list.map((w) => (
+              {list.filter((w) => !w.group_id).map((w) => (
                 <tr key={w.id}>
                   <td>{w.namespace}
                     {w.is_personal && <span className="admin-scope-badge" style={{ marginLeft: 6 }}>personal</span>}
-                    {w.group_name && <span className="admin-scope-badge" style={{ marginLeft: 6 }}>group: {w.group_name}</span>}
                   </td>
                   <td>{w.transport}</td>
-                  <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.remote_url}>{w.group_id ? <em style={{ color: '#a6adc8' }}>via group</em> : w.remote_url}</td>
+                  <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.remote_url}>{w.remote_url}</td>
                   <td>{w.branch}</td>
                   <td>{w.has_credential ? 'yes' : '-'}</td>
                   <td>{w.git_enabled ? 'yes' : '-'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {!w.is_personal && !w.group_id && <button className="modal-btn" onClick={() => edit(w)}>Edit</button>}
+                    {!w.is_personal && <button className="modal-btn" onClick={() => edit(w)}>Edit</button>}
                     {!w.is_personal && <button className="token-revoke" onClick={() => del(w)}>Delete</button>}
                   </td>
                 </tr>
@@ -788,7 +790,7 @@ function WorkspacesTab() {
 // GroupsSection: superadmin CRUD over workspace groups (a shared remote base +
 // token) with a per-group "+ New workspace" action that adds a namespace which
 // inherits the group's remote (repo = <base>/<namespace>.git).
-function GroupsSection({ onWorkspacesChanged }) {
+function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
   const empty = { name: '', transport: 'https', base_url: '', username: 'oauth2', branch: 'main', known_hosts: '', credential: '' };
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -838,6 +840,26 @@ function GroupsSection({ onWorkspacesChanged }) {
     } catch (e) { setErr(e.message); }
   };
 
+  // Sub-project (member namespace) CRUD. A grouped workspace inherits the
+  // group's remote, so the only editable field is the on/off toggle; delete
+  // removes the mirror config (notes stay). Available on every group, including
+  // provisioned ones.
+  const toggleMember = async (w) => {
+    setErr('');
+    try {
+      await adminSaveWorkspace({ git_enabled: !w.git_enabled }, w.id);
+      load(); onWorkspacesChanged && onWorkspacesChanged();
+    } catch (e) { setErr(e.message); }
+  };
+  const delMember = async (w) => {
+    if (!confirm(`Remove namespace "${w.namespace}" from this group? Notes stay; mirroring stops.`)) return;
+    setErr('');
+    try {
+      await adminDeleteWorkspace(w.id);
+      load(); onWorkspacesChanged && onWorkspacesChanged();
+    } catch (e) { setErr(e.message); }
+  };
+
   return (
     <div>
       <h4 style={{ margin: '0.2rem 0' }}>Groups</h4>
@@ -867,22 +889,62 @@ function GroupsSection({ onWorkspacesChanged }) {
       <div style={{ marginTop: '0.8rem' }}>
         {loading ? <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
           : groups.length === 0 ? <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No groups yet.</p>
-          : groups.map((g) => (
+          : groups.map((g) => {
+            const provisioned = g.source === 'provisioned';
+            const members = workspaces.filter((w) => w.group_id === g.id);
+            return (
             <div key={g.id} style={{ border: '1px solid #313244', borderRadius: 6, padding: '0.5rem 0.6rem', marginBottom: '0.5rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <strong>{g.name}</strong>
-                <span style={{ fontSize: '0.8rem', color: '#a6adc8' }}>{g.transport} · {g.base_url} · {g.branch} · cred {g.has_credential ? 'yes' : 'no'} · {g.workspace_count} ws</span>
+                {provisioned
+                  ? <span className="admin-scope-badge" title="Reconciled from the deployment config (GIT_REMOTE_URL). You can manage its sub-projects, but not edit or delete the group.">provisioned</span>
+                  : <span className="role-badge collaborator">ui</span>}
+                <span style={{ fontSize: '0.8rem', color: '#a6adc8' }}>{g.transport} · {g.base_url} · {g.branch} · cred {g.has_credential ? 'yes' : 'no'} · {g.workspace_count} project{g.workspace_count === 1 ? '' : 's'}</span>
                 <span style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-                  <button className="modal-btn" onClick={() => edit(g)}>Edit</button>
-                  <button className="token-revoke" onClick={() => del(g)}>Delete</button>
+                  {provisioned
+                    ? <span style={{ fontSize: '0.78rem', color: '#6c7086' }} title="Managed by the deployment (env config)">🔒 managed by deployment</span>
+                    : <>
+                        <button className="modal-btn" onClick={() => edit(g)}>Edit</button>
+                        <button className="token-revoke" onClick={() => del(g)}>Delete</button>
+                      </>}
                 </span>
               </div>
+
+              <div style={{ marginTop: '0.5rem' }}>
+                {members.length === 0
+                  ? <p style={{ color: '#6c7086', fontSize: '0.8rem', margin: '0.2rem 0' }}>No projects in this group yet.</p>
+                  : (
+                    <table className="admin-table" style={{ fontSize: '0.8rem' }}>
+                      <thead>
+                        <tr><th>Project (namespace)</th><th>Repository</th><th>On</th><th>Sync</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {members.map((w) => (
+                          <tr key={w.id}>
+                            <td>{w.namespace}</td>
+                            <td style={{ color: '#a6adc8' }} title={`${g.base_url.replace(/\/$/, '')}/${w.namespace}.git`}>{w.namespace}.git</td>
+                            <td>{w.git_enabled ? 'yes' : '-'}</td>
+                            <td>{w.last_sync_error
+                              ? <span style={{ color: '#f38ba8' }} title={w.last_sync_error}>error</span>
+                              : <span style={{ color: '#a6e3a1' }}>ok</span>}</td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
+                              <button className="modal-btn" onClick={() => toggleMember(w)}>{w.git_enabled ? 'Disable' : 'Enable'}</button>
+                              <button className="token-revoke" onClick={() => delMember(w)}>Remove</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+              </div>
+
               <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
-                <input className="modal-input" placeholder="new namespace in this group" value={newNs[g.id] || ''} onChange={(e) => setNewNs((m) => ({ ...m, [g.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') addWs(g); }} style={{ flex: 1 }} />
-                <button className="modal-btn-primary" onClick={() => addWs(g)}>+ New workspace</button>
+                <input className="modal-input" placeholder="new project (namespace) in this group" value={newNs[g.id] || ''} onChange={(e) => setNewNs((m) => ({ ...m, [g.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') addWs(g); }} style={{ flex: 1 }} />
+                <button className="modal-btn-primary" onClick={() => addWs(g)}>+ Add project</button>
               </div>
             </div>
-          ))}
+            );
+          })}
       </div>
     </div>
   );

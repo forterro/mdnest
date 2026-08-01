@@ -58,6 +58,9 @@ func (f *fakeWSStore) UpdateGroup(_ int, in store.WorkspaceGroupInput) (*store.W
 	return &store.WorkspaceGroup{Name: in.Name}, nil
 }
 func (f *fakeWSStore) DeleteGroup(int) (bool, error) { return true, nil }
+func (f *fakeWSStore) EnsureProvisionedGroup(spec store.ProvisionedGroupSpec) (*store.WorkspaceGroup, error) {
+	return &store.WorkspaceGroup{Name: spec.Name, BaseURL: spec.BaseURL, Source: "provisioned"}, nil
+}
 func (f *fakeWSStore) CreateInGroup(groupID int, ns string, _ bool) (*store.Workspace, error) {
 	f.inGroupCall = true
 	f.inGroupID = groupID
@@ -318,6 +321,29 @@ func TestGroupCreateValidatesBaseURL(t *testing.T) {
 	h.HandleGroups(w2, r2)
 	if w2.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s, want 201", w2.Code, w2.Body.String())
+	}
+}
+
+// A provisioned group is owned by the deployment: the admin panel may manage its
+// sub-projects but must not edit or delete the group itself.
+func TestProvisionedGroupIsImmutable(t *testing.T) {
+	fs := &fakeWSStore{groups: map[int]*store.WorkspaceGroup{
+		3: {ID: 3, Name: "Provisioned workspaces", Source: "provisioned", BaseURL: "https://gitlab.forterro.com/mdnest-workspaces/dev"},
+	}}
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
+
+	put := httptest.NewRequest(http.MethodPut, "/api/admin/workspace-groups?id=3", strings.NewReader(`{"name":"renamed","transport":"https","base_url":"https://gitlab.forterro.com/g"}`))
+	pw := httptest.NewRecorder()
+	h.HandleGroups(pw, put)
+	if pw.Code != http.StatusForbidden {
+		t.Fatalf("PUT status=%d, want 403 for provisioned group", pw.Code)
+	}
+
+	del := httptest.NewRequest(http.MethodDelete, "/api/admin/workspace-groups?id=3", nil)
+	dw := httptest.NewRecorder()
+	h.HandleGroups(dw, del)
+	if dw.Code != http.StatusForbidden {
+		t.Fatalf("DELETE status=%d, want 403 for provisioned group", dw.Code)
 	}
 }
 
