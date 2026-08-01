@@ -801,8 +801,8 @@ function WorkspacesTab() {
                   <td>{w.has_credential ? 'yes' : '-'}</td>
                   <td>{w.git_enabled ? 'yes' : '-'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {!w.is_personal && <button className="modal-btn" onClick={() => edit(w)}>Edit</button>}
-                    {!w.is_personal && <button className="token-revoke" onClick={() => del(w)}>Delete</button>}
+                    {!w.is_personal && <button className="admin-action-btn" onClick={() => edit(w)}>Edit</button>}
+                    {!w.is_personal && <button className="admin-action-btn danger" onClick={() => del(w)}>Delete</button>}
                   </td>
                 </tr>
               ))}
@@ -931,6 +931,9 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
           : groups.map((g) => {
             const provisioned = g.source === 'provisioned';
             const members = workspaces.filter((w) => w.group_id === g.id);
+            const implicit = g.implicit_namespaces || [];
+            const base = (g.base_url || '').replace(/\/$/, '');
+            const projectCount = members.length + implicit.length;
             return (
             <div key={g.id} style={{ border: '1px solid #313244', borderRadius: 6, padding: '0.5rem 0.6rem', marginBottom: '0.5rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -938,19 +941,19 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
                 {provisioned
                   ? <span className="admin-scope-badge" title="Reconciled from the deployment config (GIT_REMOTE_URL). You can manage its sub-projects, but not edit or delete the group.">provisioned</span>
                   : <span className="role-badge collaborator">ui</span>}
-                <span style={{ fontSize: '0.8rem', color: '#a6adc8' }}>{g.transport} · {g.base_url} · {g.branch} · cred {g.has_credential ? 'yes' : 'no'} · {g.workspace_count} project{g.workspace_count === 1 ? '' : 's'}</span>
+                <span style={{ fontSize: '0.8rem', color: '#a6adc8' }}>{g.transport} · {g.base_url} · {g.branch} · cred {g.has_credential ? 'yes' : 'no'} · {projectCount} project{projectCount === 1 ? '' : 's'}</span>
                 <span style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
                   {provisioned
                     ? <span style={{ fontSize: '0.78rem', color: '#6c7086' }} title="Managed by the deployment (env config)">🔒 managed by deployment</span>
                     : <>
-                        <button className="modal-btn" onClick={() => edit(g)}>Edit</button>
-                        <button className="token-revoke" onClick={() => del(g)}>Delete</button>
+                        <button className="admin-action-btn" onClick={() => edit(g)}>Edit</button>
+                        <button className="admin-action-btn danger" onClick={() => del(g)}>Delete</button>
                       </>}
                 </span>
               </div>
 
               <div style={{ marginTop: '0.5rem' }}>
-                {members.length === 0
+                {members.length === 0 && implicit.length === 0
                   ? <p style={{ color: '#6c7086', fontSize: '0.8rem', margin: '0.2rem 0' }}>No projects in this group yet.</p>
                   : (
                     <table className="admin-table" style={{ fontSize: '0.8rem' }}>
@@ -961,15 +964,24 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
                         {members.map((w) => (
                           <tr key={w.id}>
                             <td>{w.namespace}</td>
-                            <td style={{ color: '#a6adc8' }} title={`${g.base_url.replace(/\/$/, '')}/${w.namespace}.git`}>{w.namespace}.git</td>
+                            <td style={{ color: '#a6adc8' }} title={`${base}/${w.namespace}.git`}>{w.namespace}.git</td>
                             <td>{w.git_enabled ? 'yes' : '-'}</td>
                             <td>{w.last_sync_error
                               ? <span style={{ color: '#f38ba8' }} title={w.last_sync_error}>error</span>
                               : <span style={{ color: '#a6e3a1' }}>ok</span>}</td>
                             <td style={{ whiteSpace: 'nowrap' }}>
-                              <button className="modal-btn" onClick={() => toggleMember(w)}>{w.git_enabled ? 'Disable' : 'Enable'}</button>
-                              <button className="token-revoke" onClick={() => delMember(w)}>Remove</button>
+                              <button className="admin-action-btn" onClick={() => toggleMember(w)}>{w.git_enabled ? 'Disable' : 'Enable'}</button>
+                              <button className="admin-action-btn danger" onClick={() => delMember(w)}>Remove</button>
                             </td>
+                          </tr>
+                        ))}
+                        {implicit.map((ns) => (
+                          <tr key={`imp-${ns}`}>
+                            <td>{ns} <span className="admin-scope-badge" style={{ marginLeft: 4 }} title="Existing namespace mirroring under this base via the env default — no explicit workspace row">env default</span></td>
+                            <td style={{ color: '#a6adc8' }} title={`${base}/${ns}.git`}>{ns}.git</td>
+                            <td>yes</td>
+                            <td><span style={{ color: '#6c7086' }}>—</span></td>
+                            <td style={{ color: '#6c7086', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>managed by deployment</td>
                           </tr>
                         ))}
                       </tbody>
