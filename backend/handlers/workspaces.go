@@ -332,18 +332,21 @@ func (h *WorkspaceHandler) adminDelete(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	// Decommissioning a project revokes its access metadata so no orphaned
-	// grants / namespace-admins linger (the notes themselves stay in git).
+	// Decommissioning a project revokes its access metadata and removes the
+	// namespace from storage (so it leaves the working set / UI); the notes
+	// themselves survive on the git remote mirror, if any.
 	if existing != nil {
-		h.revokeNamespaceAccess(existing.Namespace)
+		h.decommissionNamespace(r.Context(), existing.Namespace)
 	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
-// revokeNamespaceAccess removes every access grant and namespace-admin row for a
-// namespace. Best-effort: failures are logged, not fatal (the workspace row is
-// already gone).
-func (h *WorkspaceHandler) revokeNamespaceAccess(ns string) {
+// decommissionNamespace tears a namespace down when its project is deleted:
+// revoke access grants + namespace-admins and purge it from storage (removing it
+// from the working set / namespace registry so it leaves the UI). The remote git
+// mirror repository, if any, is left untouched as the durable archive.
+// Best-effort: failures are logged, not fatal.
+func (h *WorkspaceHandler) decommissionNamespace(ctx context.Context, ns string) {
 	if ns == "" {
 		return
 	}
@@ -357,6 +360,11 @@ func (h *WorkspaceHandler) revokeNamespaceAccess(ns string) {
 	if h.nsAdmins != nil {
 		if _, err := h.nsAdmins.DeleteAllForNamespace(ns); err != nil {
 			log.Printf("workspaces: could not remove namespace-admins for %q: %v", ns, err)
+		}
+	}
+	if h.stg != nil {
+		if err := h.stg.RemoveAll(ctx, ns, ""); err != nil {
+			log.Printf("workspaces: could not remove namespace %q from storage: %v", ns, err)
 		}
 	}
 }
@@ -554,7 +562,7 @@ func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	for _, ns := range memberNamespaces {
-		h.revokeNamespaceAccess(ns)
+		h.decommissionNamespace(r.Context(), ns)
 	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }

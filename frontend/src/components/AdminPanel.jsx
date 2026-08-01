@@ -696,7 +696,7 @@ function WorkspacesTab() {
   };
 
   const del = async (w) => {
-    if (!confirm(`Delete the git remote for "${w.namespace}"? Notes stay in git; mirroring stops and all access grants + namespace admins for this namespace are revoked.`)) return;
+    if (!confirm(`Delete "${w.namespace}"? This removes the namespace and its notes from mdnest and revokes all access grants + namespace admins. The git remote repository (if any) is kept as the archive.`)) return;
     try {
       await adminDeleteWorkspace(w.id);
       if (editId === w.id) reset();
@@ -867,7 +867,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
   };
 
   const del = async (g) => {
-    if (!confirm(`Delete group "${g.name}"? Its ${g.workspace_count} workspace(s) mirror config is removed (notes stay in git); access grants + namespace admins for those namespaces are revoked.`)) return;
+    if (!confirm(`Delete group "${g.name}" and its ${g.workspace_count} project(s)? Each project namespace and its notes are removed from mdnest and all access grants + namespace admins revoked. The git remote repositories (if any) are kept as archives.`)) return;
     try { await adminDeleteWorkspaceGroup(g.id); if (editId === g.id) reset(); load(); onWorkspacesChanged && onWorkspacesChanged(); }
     catch (e) { setErr(e.message); }
   };
@@ -895,7 +895,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
     } catch (e) { setErr(e.message); }
   };
   const delMember = async (w) => {
-    if (!confirm(`Remove namespace "${w.namespace}" from this group? Notes stay in git; mirroring stops and all access grants + namespace admins for this namespace are revoked.`)) return;
+    if (!confirm(`Remove "${w.namespace}" from this group? This removes the namespace and its notes from mdnest and revokes all access grants + namespace admins. The git remote repository (if any) is kept as the archive.`)) return;
     setErr('');
     try {
       await adminDeleteWorkspace(w.id);
