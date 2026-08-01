@@ -650,6 +650,7 @@ function WorkspacesTab() {
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState(null);
   const [err, setErr] = useState('');
+  const [showForm, setShowForm] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -663,12 +664,14 @@ function WorkspacesTab() {
   useEffect(() => { load(); }, [load]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
-  const reset = () => { setForm(empty); setEditId(null); setErr(''); };
+  const reset = () => { setForm(empty); setEditId(null); setErr(''); setShowForm(false); };
+  const openCreate = () => { setForm(empty); setEditId(null); setErr(''); setShowForm(true); };
 
   const edit = (w) => {
     setEditId(w.id);
     setErr('');
     setForm({ namespace: w.namespace, git_enabled: w.git_enabled, transport: w.transport, remote_url: w.remote_url, username: w.username, branch: w.branch, known_hosts: w.known_hosts || '', credential: '' });
+    setShowForm(true);
   };
 
   const save = async () => {
@@ -720,37 +723,47 @@ function WorkspacesTab() {
 
       <GroupsSection workspaces={list} onWorkspacesChanged={load} />
 
-      <h4 style={{ margin: '1.4rem 0 0.2rem' }}>Standalone workspaces</h4>
-      <div className="admin-form" style={{ display: 'grid', gap: '0.4rem', maxWidth: 620 }}>
-        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{editId ? `Edit "${form.namespace}"` : 'Add a shared workspace'}</div>
-        {!editId && (
-          <input className="modal-input" placeholder="namespace (e.g. team-a)" value={form.namespace} onChange={set('namespace')} />
-        )}
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <select className="modal-input" value={form.transport} onChange={set('transport')} style={{ maxWidth: 160 }}>
-            <option value="https">HTTPS</option>
-            <option value="ssh">SSH</option>
-          </select>
-          <input className="modal-input" placeholder={form.transport === 'ssh' ? 'git@host:grp/ns.git' : 'https://host/grp/ns.git'} value={form.remote_url} onChange={set('remote_url')} style={{ flex: 1 }} />
-        </div>
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          {form.transport === 'https' && (
-            <input className="modal-input" placeholder="username (oauth2)" value={form.username} onChange={set('username')} style={{ maxWidth: 200 }} />
-          )}
-          <input className="modal-input" placeholder="branch (main)" value={form.branch} onChange={set('branch')} style={{ maxWidth: 160 }} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem' }}>
-            <input type="checkbox" checked={form.git_enabled} onChange={set('git_enabled')} /> enabled
-          </label>
-        </div>
-        {form.transport === 'ssh' && (
-          <textarea className="modal-input" rows={2} placeholder="known_hosts line (host ssh-ed25519 AAAA...)" value={form.known_hosts} onChange={set('known_hosts')} />
-        )}
-        <input className="modal-input" type="password" placeholder={form.transport === 'ssh' ? 'private key (blank = keep)' : 'PAT / deploy token (blank = keep)'} value={form.credential} onChange={set('credential')} />
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <button className="modal-btn-primary" onClick={save}>{editId ? 'Save' : 'Add'}</button>
-          {editId && <button className="modal-btn" onClick={reset}>Cancel</button>}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', margin: '1.4rem 0 0.2rem' }}>
+        <h4 style={{ margin: 0 }}>Standalone workspaces</h4>
+        <button className="modal-btn-primary" onClick={openCreate}>+ Add standalone workspace</button>
       </div>
+
+      {showForm && (
+        <div className="modal-backdrop" onClick={reset}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h3>{editId ? `Edit "${form.namespace}"` : 'Add a standalone workspace'}</h3>
+            <div style={{ display: 'grid', gap: '0.4rem' }}>
+              {!editId && (
+                <input className="modal-input" placeholder="namespace (e.g. team-a)" value={form.namespace} onChange={set('namespace')} />
+              )}
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <select className="modal-input" value={form.transport} onChange={set('transport')} style={{ maxWidth: 160 }}>
+                  <option value="https">HTTPS</option>
+                  <option value="ssh">SSH</option>
+                </select>
+                <input className="modal-input" placeholder={form.transport === 'ssh' ? 'git@host:grp/ns.git' : 'https://host/grp/ns.git'} value={form.remote_url} onChange={set('remote_url')} style={{ flex: 1 }} />
+              </div>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {form.transport === 'https' && (
+                  <input className="modal-input" placeholder="username (oauth2)" value={form.username} onChange={set('username')} style={{ maxWidth: 200 }} />
+                )}
+                <input className="modal-input" placeholder="branch (main)" value={form.branch} onChange={set('branch')} style={{ maxWidth: 160 }} />
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem' }}>
+                  <input type="checkbox" checked={form.git_enabled} onChange={set('git_enabled')} /> enabled
+                </label>
+              </div>
+              {form.transport === 'ssh' && (
+                <textarea className="modal-input" rows={2} placeholder="known_hosts line (host ssh-ed25519 AAAA...)" value={form.known_hosts} onChange={set('known_hosts')} />
+              )}
+              <input className="modal-input" type="password" placeholder={form.transport === 'ssh' ? 'private key (blank = keep)' : 'PAT / deploy token (blank = keep)'} value={form.credential} onChange={set('credential')} />
+              <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end', marginTop: '0.4rem' }}>
+                <button className="modal-btn" onClick={reset}>Cancel</button>
+                <button className="modal-btn-primary" onClick={save}>{editId ? 'Save' : 'Add'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ marginTop: '1rem' }}>
         {loading ? (
@@ -798,6 +811,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
   const [editId, setEditId] = useState(null);
   const [err, setErr] = useState('');
   const [newNs, setNewNs] = useState({});
+  const [showForm, setShowForm] = useState(false);
 
   const load = useCallback(async () => {
     try { setGroups(await adminListWorkspaceGroups() || []); }
@@ -807,10 +821,12 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
   useEffect(() => { load(); }, [load]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const reset = () => { setForm(empty); setEditId(null); setErr(''); };
+  const reset = () => { setForm(empty); setEditId(null); setErr(''); setShowForm(false); };
+  const openCreate = () => { setForm(empty); setEditId(null); setErr(''); setShowForm(true); };
   const edit = (g) => {
     setEditId(g.id); setErr('');
     setForm({ name: g.name, transport: g.transport, base_url: g.base_url, username: g.username, branch: g.branch, known_hosts: g.known_hosts || '', credential: '' });
+    setShowForm(true);
   };
 
   const save = async () => {
@@ -862,29 +878,38 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
 
   return (
     <div>
-      <h4 style={{ margin: '0.2rem 0' }}>Groups</h4>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', margin: '0.2rem 0' }}>
+        <h4 style={{ margin: 0 }}>Groups</h4>
+        <button className="modal-btn-primary" onClick={openCreate}>+ Add group</button>
+      </div>
       {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.4rem' }}>{err}</div>}
 
-      <div className="admin-form" style={{ display: 'grid', gap: '0.4rem', maxWidth: 620 }}>
-        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{editId ? `Edit group "${form.name}"` : 'Add a group'}</div>
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <input className="modal-input" placeholder="group name (e.g. Team workspaces)" value={form.name} onChange={set('name')} style={{ flex: 1 }} />
-          <select className="modal-input" value={form.transport} onChange={set('transport')} style={{ maxWidth: 140 }}>
-            <option value="https">HTTPS</option><option value="ssh">SSH</option>
-          </select>
+      {showForm && (
+        <div className="modal-backdrop" onClick={reset}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h3>{editId ? `Edit group "${form.name}"` : 'Add a group'}</h3>
+            <div style={{ display: 'grid', gap: '0.4rem' }}>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <input className="modal-input" placeholder="group name (e.g. Team workspaces)" value={form.name} onChange={set('name')} style={{ flex: 1 }} />
+                <select className="modal-input" value={form.transport} onChange={set('transport')} style={{ maxWidth: 140 }}>
+                  <option value="https">HTTPS</option><option value="ssh">SSH</option>
+                </select>
+              </div>
+              <input className="modal-input" placeholder={form.transport === 'ssh' ? 'base: git@host:group' : 'base: https://host/group'} value={form.base_url} onChange={set('base_url')} />
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {form.transport === 'https' && <input className="modal-input" placeholder="username (oauth2)" value={form.username} onChange={set('username')} style={{ maxWidth: 200 }} />}
+                <input className="modal-input" placeholder="branch (main)" value={form.branch} onChange={set('branch')} style={{ maxWidth: 160 }} />
+              </div>
+              {form.transport === 'ssh' && <textarea className="modal-input" rows={2} placeholder="known_hosts line (host ssh-ed25519 AAAA...)" value={form.known_hosts} onChange={set('known_hosts')} />}
+              <input className="modal-input" type="password" placeholder={form.transport === 'ssh' ? 'shared private key (blank = keep)' : 'shared PAT / deploy token (blank = keep)'} value={form.credential} onChange={set('credential')} />
+              <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end', marginTop: '0.4rem' }}>
+                <button className="modal-btn" onClick={reset}>Cancel</button>
+                <button className="modal-btn-primary" onClick={save}>{editId ? 'Save' : 'Add group'}</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <input className="modal-input" placeholder={form.transport === 'ssh' ? 'base: git@host:group' : 'base: https://host/group'} value={form.base_url} onChange={set('base_url')} />
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          {form.transport === 'https' && <input className="modal-input" placeholder="username (oauth2)" value={form.username} onChange={set('username')} style={{ maxWidth: 200 }} />}
-          <input className="modal-input" placeholder="branch (main)" value={form.branch} onChange={set('branch')} style={{ maxWidth: 160 }} />
-        </div>
-        {form.transport === 'ssh' && <textarea className="modal-input" rows={2} placeholder="known_hosts line (host ssh-ed25519 AAAA...)" value={form.known_hosts} onChange={set('known_hosts')} />}
-        <input className="modal-input" type="password" placeholder={form.transport === 'ssh' ? 'shared private key (blank = keep)' : 'shared PAT / deploy token (blank = keep)'} value={form.credential} onChange={set('credential')} />
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <button className="modal-btn-primary" onClick={save}>{editId ? 'Save' : 'Add group'}</button>
-          {editId && <button className="modal-btn" onClick={reset}>Cancel</button>}
-        </div>
-      </div>
+      )}
 
       <div style={{ marginTop: '0.8rem' }}>
         {loading ? <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
