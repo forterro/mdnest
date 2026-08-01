@@ -1520,10 +1520,6 @@ function App() {
                 >
                   {content === null ? (
                     <div className="editor-loading">Loading note…</div>
-                  ) : (marpEnabled && editorMode === 'live' && isMarpDoc(content)) ? (
-                    <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
-                      <MarpDeck content={content} />
-                    </Suspense>
                   ) : editorMode === 'live' ? (
                     <EditorErrorBoundary
                       resetKey={`${selectedNs}/${currentPath}`}
@@ -1614,7 +1610,13 @@ function App() {
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
-                  <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
+                  {marpEnabled && isMarpDoc(content) ? (
+                    <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
+                      <MarpDeck content={content || ''} />
+                    </Suspense>
+                  ) : (
+                    <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
+                  )}
                 </div>
               )}
             </>
