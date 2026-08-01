@@ -16,6 +16,9 @@ const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
 // it is off by default (ENABLE_TASK_BOARD), so an install that doesn't use it
 // must not carry the chunk on first paint.
 const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
+// Lazy Marp slide-deck renderer: pulls in the Marp engine, off by default
+// (ENABLE_MARP), so an install that doesn't use it never carries the chunk.
+const MarpDeck = lazy(() => import('./components/MarpDeck.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -27,6 +30,7 @@ import HistoryModal from './components/HistoryModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
+import { isMarpDoc } from './marp.js';
 import {
   getToken,
   getNote,
@@ -267,6 +271,10 @@ function App() {
   // ENABLE_TASK_BOARD on the backend. When off, /api/tasks and /api/board are
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
+
+  // ENABLE_MARP on the backend. When on, a note whose frontmatter says
+  // `marp: true` is shown as a slide deck in the Live view instead of the editor.
+  const marpEnabled = !!appConfig?.marp;
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -1512,6 +1520,10 @@ function App() {
                 >
                   {content === null ? (
                     <div className="editor-loading">Loading note…</div>
+                  ) : (marpEnabled && editorMode === 'live' && isMarpDoc(content)) ? (
+                    <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
+                      <MarpDeck content={content} />
+                    </Suspense>
                   ) : editorMode === 'live' ? (
                     <EditorErrorBoundary
                       resetKey={`${selectedNs}/${currentPath}`}
