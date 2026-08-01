@@ -814,6 +814,16 @@ function WorkspacesTab() {
   );
 }
 
+// syncBadge renders a workspace's honest mirror-sync state. "ok" (green) is
+// shown only after a confirmed successful sync (last_sync_at set with no error);
+// a git-enabled workspace that has never synced is "pending", not "ok".
+function syncBadge(w) {
+  if (!w.git_enabled) return <span style={{ color: '#6c7086' }}>off</span>;
+  if (w.last_sync_error) return <span style={{ color: '#f38ba8' }} title={w.last_sync_error}>error</span>;
+  if (w.last_sync_at) return <span style={{ color: '#a6e3a1' }} title={`last synced ${new Date(w.last_sync_at).toLocaleString()}`}>ok</span>;
+  return <span style={{ color: '#6c7086' }} title="No successful sync yet">pending</span>;
+}
+
 // GroupsSection: superadmin CRUD over workspace groups (a shared remote base +
 // token) with a per-group "+ New workspace" action that adds a namespace which
 // inherits the group's remote (repo = <base>/<namespace>.git).
@@ -966,9 +976,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
                             <td>{w.namespace}</td>
                             <td style={{ color: '#a6adc8' }} title={`${base}/${w.namespace}.git`}>{w.namespace}.git</td>
                             <td>{w.git_enabled ? 'yes' : '-'}</td>
-                            <td>{w.last_sync_error
-                              ? <span style={{ color: '#f38ba8' }} title={w.last_sync_error}>error</span>
-                              : <span style={{ color: '#a6e3a1' }}>ok</span>}</td>
+                            <td>{syncBadge(w)}</td>
                             <td style={{ whiteSpace: 'nowrap' }}>
                               <button className="admin-action-btn" onClick={() => toggleMember(w)}>{w.git_enabled ? 'Disable' : 'Enable'}</button>
                               <button className="admin-action-btn danger" onClick={() => delMember(w)}>Remove</button>
