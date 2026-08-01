@@ -816,10 +816,13 @@ function WorkspacesTab() {
 
 // syncBadge renders a workspace's honest mirror-sync state. "ok" (green) is
 // shown only after a confirmed successful sync (last_sync_at set with no error);
-// a git-enabled workspace that has never synced is "pending", not "ok".
+// a git-enabled workspace that has never synced — or whose remote repo is not
+// created yet (a "pending:" status) — is "pending", not "ok" and not a red error.
 function syncBadge(w) {
   if (!w.git_enabled) return <span style={{ color: '#6c7086' }}>off</span>;
-  if (w.last_sync_error) return <span style={{ color: '#f38ba8' }} title={w.last_sync_error}>error</span>;
+  const err = w.last_sync_error;
+  if (err && err.startsWith('pending:')) return <span style={{ color: '#6c7086' }} title={err}>pending</span>;
+  if (err) return <span style={{ color: '#f38ba8' }} title={err}>error</span>;
   if (w.last_sync_at) return <span style={{ color: '#a6e3a1' }} title={`last synced ${new Date(w.last_sync_at).toLocaleString()}`}>ok</span>;
   return <span style={{ color: '#6c7086' }} title="No successful sync yet">pending</span>;
 }
