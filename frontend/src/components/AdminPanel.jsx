@@ -708,17 +708,31 @@ function WorkspacesTab() {
 
   return (
     <div className="admin-tab-content">
-      <p className="admin-description">
-        Per-namespace git remotes. Use a <strong>group</strong> to declare a
-        shared remote base + token once and add namespaces to it (one repo per
-        namespace, like the env provisioning), or a <strong>standalone</strong>
-        workspace to mirror a single namespace to one specific repository.
-        Credentials are stored encrypted and never shown again. A group tagged
-        <span className="admin-scope-badge" style={{ margin: '0 3px' }}>provisioned</span>
-        comes from the deployment config (GIT_REMOTE_URL): you can add or remove
-        its projects, but not edit or delete the group itself. Personal
-        workspaces are managed by each user under Settings → Git remote.
-      </p>
+      <div className="admin-description">
+        <p>
+          Per-namespace git remotes — each namespace mirrors to its own
+          repository. Credentials are stored encrypted and never shown again.
+        </p>
+        <ul>
+          <li>
+            <strong>Group</strong> — declare a shared remote base + token once,
+            then add projects (namespaces); each mirrors to <code>&lt;base&gt;/&lt;namespace&gt;.git</code>.
+          </li>
+          <li>
+            <strong>Standalone</strong> — mirror a single namespace to one
+            specific repository.
+          </li>
+          <li>
+            <span className="admin-scope-badge">provisioned</span> — a group
+            reconciled from the deployment config (<code>GIT_REMOTE_URL</code>):
+            you can add or remove its projects, but the group itself can't be
+            edited or deleted.
+          </li>
+        </ul>
+        <p className="admin-description-foot">
+          Personal workspaces are managed by each user under Settings → Git remote.
+        </p>
+      </div>
       {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
 
       <GroupsSection workspaces={list} onWorkspacesChanged={load} />
