@@ -8,17 +8,18 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
-import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers } from '../api';
+import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTasks } from '../api';
 import { matchesTaskFilters } from '../taskFilters';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
 import './TaskBoard.css';
 
 // A task is identified across the UI by its source location, which is unique
-// even when two items share the same text. The backend id is content-derived
-// and can collide, so it is not used as a DnD key.
+// even when two items share the same text. In the global (cross-namespace) view
+// two namespaces can share a note path + line, so the namespace is part of the
+// key. The backend id is content-derived and can collide, so it is not used.
 function cardKey(t) {
-  return `${t.path}\u0000${t.line}`;
+  return `${t.namespace || ''}\u0000${t.path}\u0000${t.line}`;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -46,8 +47,9 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit }) {
         <span className="tb-card-text">{task.text || <em>(empty)</em>}</span>
       </div>
 
-      {(task.due || task.workload || task.assignee || steps.length > 0) && (
+      {(task.due || task.workload || task.assignee || task.namespace || steps.length > 0) && (
         <div className="tb-card-meta">
+          {task.namespace && <span className="tb-chip tb-ns" title="Workspace">🗂 {task.namespace}</span>}
           {task.due && <span className={`tb-due${overdue ? ' overdue' : ''}`} title="Due date">📅 {task.due}</span>}
           {task.workload && <span className="tb-chip" title="Workload">🏋 {task.workload}</span>}
           {task.assignee && <span className="tb-chip" title="Assignee">👤 {task.assignee}</span>}
@@ -151,19 +153,23 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [tagFilter, setTagFilter] = useState([]); // selected tags (OR)
   const [assigneeFilter, setAssigneeFilter] = useState(''); // '' | '@me' | '@unassigned' | <username>
 
-  // The note-scoped view only makes sense with a note open.
-  const effectiveScope = currentPath ? scope : 'workspace';
+  // The note-scoped view only makes sense with a note open; the global view
+  // spans every workspace and ignores the current note/namespace for reads.
+  const effectiveScope = scope === 'note' && !currentPath ? 'workspace' : scope;
+  const isGlobal = effectiveScope === 'global';
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
 
   const reload = useCallback(async () => {
-    if (!ns) return;
+    if (!ns && !isGlobal) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined);
+      const data = isGlobal
+        ? await getAllTasks()
+        : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined);
       setBoard(data.board);
       setTasks(data.tasks || []);
     } catch (e) {
@@ -171,7 +177,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     } finally {
       setLoading(false);
     }
-  }, [ns, effectiveScope, currentPath]);
+  }, [ns, effectiveScope, isGlobal, currentPath]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -199,7 +205,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const handleToggle = useCallback(async (task) => {
     const key = cardKey(task);
     try {
-      const updated = await patchTask(ns, task.path, {
+      const updated = await patchTask(task.namespace || ns, task.path, {
         line: task.line,
         raw: task.raw,
         checked: !task.checked,
@@ -219,7 +225,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       ? { ...t, steps: t.steps.map((s) => (s.line === step.line ? { ...s, checked: !s.checked } : s)) }
       : t)));
     try {
-      const res = await patchTask(ns, task.path, { line: step.line, raw: step.raw, checked: !step.checked });
+      const res = await patchTask(task.namespace || ns, task.path, { line: step.line, raw: step.raw, checked: !step.checked });
       if (res && res.step) {
         setTasks((cur) => cur.map((t) => (cardKey(t) === key
           ? { ...t, steps: t.steps.map((s) => (s.line === step.line ? { ...s, checked: res.checked, raw: res.raw } : s)) }
@@ -240,7 +246,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const handleEditorSave = useCallback(async (spec, note) => {
     try {
       if (editorTask) {
-        await patchTask(ns, editorTask.path, { line: editorTask.line, raw: editorTask.raw, replace: spec });
+        await patchTask(editorTask.namespace || ns, editorTask.path, { line: editorTask.line, raw: editorTask.raw, replace: spec });
       } else {
         await createTask(ns, { note: note || undefined, ...spec });
       }
@@ -266,7 +272,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     // Optimistic move so the card lands instantly.
     setTasks((cur) => cur.map((t) => (cardKey(t) === key ? { ...t, column: over.id } : t)));
     try {
-      const updated = await patchTask(ns, task.path, {
+      const updated = await patchTask(task.namespace || ns, task.path, {
         line: task.line,
         raw: task.raw,
         toColumn: over.id,
@@ -317,10 +323,13 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const tasksByNote = useMemo(() => {
     const groups = new Map();
     for (const t of filteredTasks) {
-      if (!groups.has(t.path)) groups.set(t.path, []);
-      groups.get(t.path).push(t);
+      // Global view can hold the same note path in two namespaces, so key the
+      // group by namespace + path and label it with the namespace.
+      const key = t.namespace ? `${t.namespace}\u0000${t.path}` : t.path;
+      if (!groups.has(key)) groups.set(key, { ns: t.namespace || '', path: t.path, items: [] });
+      groups.get(key).items.push(t);
     }
-    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...groups.values()].sort((a, b) => (a.ns + a.path).localeCompare(b.ns + b.path));
   }, [filteredTasks]);
 
   return (
@@ -331,19 +340,20 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
           </div>
-          {currentPath && (
-            <div className="tb-mode-toggle">
-              <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScope('workspace')} title="All notes in the workspace">Workspace</button>
+          <div className="tb-mode-toggle">
+            <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScope('workspace')} title="All notes in this workspace">Workspace</button>
+            {currentPath && (
               <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScope('note')} title="Only the current note">This note</button>
-            </div>
-          )}
+            )}
+            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={() => setScope('global')} title="Tasks across every workspace you can access">All workspaces</button>
+          </div>
         </div>
         <div className="tb-header-right">
-          {canWrite && (
+          {canWrite && !isGlobal && (
             <button className="tb-btn" onClick={openCreate} title="New task">+ New task</button>
           )}
           <button className="tb-btn" onClick={reload} title="Refresh">&#8635;</button>
-          {canWrite && (
+          {canWrite && !isGlobal && (
             <button className="tb-btn" onClick={() => setEditingColumns(true)} title="Edit columns">Columns…</button>
           )}
         </div>
@@ -427,11 +437,17 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         </DndContext>
       ) : (
         <div className="tb-list">
-          {tasksByNote.map(([notePath, items]) => (
-            <div className="tb-list-group" key={notePath}>
-              <button className="tb-list-note" onClick={() => onOpenNote(notePath)} title={`Open ${notePath}`}>
-                {notePath}
-              </button>
+          {tasksByNote.map(({ ns: groupNs, path: notePath, items }) => (
+            <div className="tb-list-group" key={`${groupNs}\u0000${notePath}`}>
+              {isGlobal ? (
+                <div className="tb-list-note tb-list-note-static" title={`${groupNs}/${notePath}`}>
+                  <span className="tb-ns">🗂 {groupNs}</span> {notePath}
+                </div>
+              ) : (
+                <button className="tb-list-note" onClick={() => onOpenNote(notePath)} title={`Open ${notePath}`}>
+                  {notePath}
+                </button>
+              )}
               <ul className="tb-list-items">
                 {items.map((t) => (
                   <li key={cardKey(t)} className={t.checked ? 'checked' : ''}>

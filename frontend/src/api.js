@@ -333,6 +333,15 @@ export async function getTasks(ns, path) {
   return res.json();
 }
 
+// Aggregate tasks across every workspace the caller can access (the global
+// view). Each task carries its owning `namespace`; the board is the union of
+// the per-workspace column layouts.
+export async function getAllTasks() {
+  const res = await request('/tasks/all');
+  if (!res.ok) throw new Error('Failed to load tasks');
+  return res.json();
+}
+
 // Create a task by appending it to a note. `body` is { text, note?, column? };
 // when note is omitted the board's default note is used.
 export async function createTask(ns, body) {

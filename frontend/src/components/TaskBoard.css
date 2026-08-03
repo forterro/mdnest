@@ -396,6 +396,9 @@
 }
 .tb-chip, .tb-due { background: #181825; border: 1px solid #313244; border-radius: 4px; padding: 1px 6px; }
 .tb-due.overdue { color: #f38ba8; border-color: #f38ba8; }
+.tb-chip.tb-ns { color: #89b4fa; border-color: #45475a; }
+.tb-list-note.tb-list-note-static { cursor: default; background: none; }
+.tb-list-note .tb-ns { color: #89b4fa; }
 
 .tb-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .tb-tag { font-size: 10px; color: #89b4fa; background: #1e2030; border: 1px solid #313244; border-radius: 10px; padding: 1px 7px; }
