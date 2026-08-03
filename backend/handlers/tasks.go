@@ -332,13 +332,20 @@ func stripIndent(line string, n int) string {
 }
 
 // parseTagsList parses `[a, b, c]` (or a bare comma list) into trimmed tags.
+// It tolerates markdown-escaped brackets (`\[a, b\]`), which the WYSIWYG editor
+// writes when tags are typed there, and strips any stray brackets left on an
+// individual tag by malformed input — so a value never surfaces as "\[ui".
 func parseTagsList(val string) []string {
 	val = strings.TrimSpace(val)
+	val = strings.ReplaceAll(val, "\\[", "[")
+	val = strings.ReplaceAll(val, "\\]", "]")
 	val = strings.TrimPrefix(val, "[")
 	val = strings.TrimSuffix(val, "]")
 	var out []string
 	for _, p := range strings.Split(val, ",") {
-		if s := strings.TrimSpace(p); s != "" {
+		s := strings.TrimSpace(p)
+		s = strings.TrimSpace(strings.Trim(s, "[]"))
+		if s != "" {
 			out = append(out, s)
 		}
 	}
