@@ -45,10 +45,11 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit }) {
         <span className="tb-card-text">{task.text || <em>(empty)</em>}</span>
       </div>
 
-      {(task.due || task.workload || steps.length > 0) && (
+      {(task.due || task.workload || task.assignee || steps.length > 0) && (
         <div className="tb-card-meta">
           {task.due && <span className={`tb-due${overdue ? ' overdue' : ''}`} title="Due date">📅 {task.due}</span>}
           {task.workload && <span className="tb-chip" title="Workload">🏋 {task.workload}</span>}
+          {task.assignee && <span className="tb-chip" title="Assignee">👤 {task.assignee}</span>}
           {steps.length > 0 && <span className="tb-chip" title="Steps done">☑ {done}/{steps.length}</span>}
         </div>
       )}
@@ -127,7 +128,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit }) 
 // item in the namespace, either as a flat list (with checkbox toggling) or as
 // a kanban board (drag a card between columns). Both views project the same
 // data — the notes themselves — so a change in one is reflected in the other.
-export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath }) {
+export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath, currentUser }) {
   const [board, setBoard] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -390,6 +391,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           defaultNote={editorTask ? editorTask.path : (board?.defaultNote || (effectiveScope === 'note' ? currentPath : '') || '')}
           defaultColumn={editorTask ? editorTask.column : ''}
           notePaths={[...new Set(tasks.map((t) => t.path))]}
+          currentUser={currentUser}
           onSave={handleEditorSave}
           onCancel={() => setEditorOpen(false)}
         />

@@ -4,7 +4,7 @@ import './TaskBoard.css';
 // TaskEditor is the full create/edit form for a task and its detail block
 // (status/column, due, priority, workload, tags, steps, notes). It emits a spec
 // the backend renders to markdown, so the note stays the source of truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, onSave, onCancel }) {
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, onSave, onCancel }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -13,6 +13,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   const [due, setDue] = useState(task?.due || '');
   const [priority, setPriority] = useState(task?.priority || '');
   const [workload, setWorkload] = useState(task?.workload || '');
+  // Who is responsible. New tasks default to the current user; editing keeps
+  // whatever the task already carries (empty stays empty).
+  const [assignee, setAssignee] = useState(task ? (task.assignee || '') : (currentUser || ''));
   const [tags, setTags] = useState((task?.tags || []).join(', '));
   const [defaultExpanded, setDefaultExpanded] = useState(!!task?.defaultExpanded);
   const [steps, setSteps] = useState((task?.steps || []).map((s) => ({ text: s.text, checked: s.checked })));
@@ -31,6 +34,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       due: due.trim(),
       priority,
       workload: workload.trim(),
+      assignee: assignee.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       defaultExpanded,
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
@@ -83,6 +87,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
           </label>
           <label className="tb-modal-field">Workload
             <input value={workload} placeholder="easy / medium / hard" onChange={(e) => setWorkload(e.target.value)} />
+          </label>
+          <label className="tb-modal-field">Assignee
+            <input value={assignee} placeholder="who realizes it" onChange={(e) => setAssignee(e.target.value)} />
           </label>
         </div>
 
