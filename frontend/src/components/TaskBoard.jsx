@@ -39,6 +39,9 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit }) {
 
   return (
     <div className={`tb-card${isDragging ? ' dragging' : ''}${task.checked ? ' checked' : ''}`} ref={setNodeRef}>
+      {task.namespace && (
+        <div className="tb-card-ns" title="Source workspace">🗂 {task.namespace}</div>
+      )}
       {/* The head is the drag handle; interactive controls below stop propagation. */}
       <div className="tb-card-head" {...(canWrite ? { ...attributes, ...listeners } : {})}>
         {task.priority && (
@@ -47,9 +50,8 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit }) {
         <span className="tb-card-text">{task.text || <em>(empty)</em>}</span>
       </div>
 
-      {(task.due || task.workload || task.assignee || task.namespace || steps.length > 0) && (
+      {(task.due || task.workload || task.assignee || steps.length > 0) && (
         <div className="tb-card-meta">
-          {task.namespace && <span className="tb-chip tb-ns" title="Workspace">🗂 {task.namespace}</span>}
           {task.due && <span className={`tb-due${overdue ? ' overdue' : ''}`} title="Due date">📅 {task.due}</span>}
           {task.workload && <span className="tb-chip" title="Workload">🏋 {task.workload}</span>}
           {task.assignee && <span className="tb-chip" title="Assignee">👤 {task.assignee}</span>}
