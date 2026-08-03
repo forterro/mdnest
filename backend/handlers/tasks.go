@@ -95,6 +95,7 @@ type Task struct {
 	Due             string   `json:"due,omitempty"`
 	Priority        string   `json:"priority,omitempty"`
 	Workload        string   `json:"workload,omitempty"`
+	Assignee        string   `json:"assignee,omitempty"` // who is responsible for the task
 	Tags            []string `json:"tags,omitempty"`
 	DefaultExpanded bool     `json:"defaultExpanded,omitempty"`
 	Steps           []Step   `json:"steps,omitempty"`
@@ -135,6 +136,7 @@ type taskSpec struct {
 	Due             string     `json:"due"`
 	Priority        string     `json:"priority"`
 	Workload        string     `json:"workload"`
+	Assignee        string     `json:"assignee"`
 	Tags            []string   `json:"tags"`
 	DefaultExpanded bool       `json:"defaultExpanded"`
 	Steps           []stepSpec `json:"steps"`
@@ -446,6 +448,8 @@ func parseCard(fp string, lines []string, cardIdx int, checked bool, rest string
 			t.Priority = val
 		case "workload":
 			t.Workload = val
+		case "assignee":
+			t.Assignee = val
 		case "tags":
 			t.Tags = parseTagsList(val)
 		case "defaultexpanded":
@@ -543,7 +547,7 @@ func applyColumnRich(lines []string, cardIdx int, b BoardConfig, colID string) (
 // editableField reports whether key is a metadata field the API may set inline.
 func editableField(key string) bool {
 	switch key {
-	case "due", "priority", "workload", "tags", "status":
+	case "due", "priority", "workload", "assignee", "tags", "status":
 		return true
 	}
 	return false
@@ -633,6 +637,7 @@ func renderTaskBlock(b BoardConfig, s taskSpec) []string {
 	add("due", s.Due)
 	add("priority", s.Priority)
 	add("workload", s.Workload)
+	add("assignee", s.Assignee)
 	var tags []string
 	for _, t := range s.Tags {
 		if t = strings.TrimSpace(t); t != "" {
