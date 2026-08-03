@@ -362,6 +362,17 @@ export async function getBoard(ns) {
   return res.json();
 }
 
+// List the users who have access to a namespace, to populate the task
+// assignee picker. Returns [{ id, username }]. Returns [] when the endpoint
+// isn't available (single mode / task board off), so callers degrade to a
+// free-choice list built from the current user and any existing assignee.
+export async function getNamespaceUsers(ns) {
+  const res = await request(`/namespace/users?ns=${encodeURIComponent(ns)}`);
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error('Failed to load namespace users');
+  return res.json();
+}
+
 export async function saveBoard(ns, board) {
   const res = await request(`/board?ns=${encodeURIComponent(ns)}`, {
     method: 'PUT',

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import './TaskBoard.css';
 
 // TaskEditor is the full create/edit form for a task and its detail block
-// (status/column, due, priority, workload, tags, steps, notes). It emits a spec
-// the backend renders to markdown, so the note stays the source of truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, onSave, onCancel }) {
+// (status/column, due, priority, workload, assignee, tags, steps, notes). It
+// emits a spec the backend renders to markdown, so the note stays the source of
+// truth.
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, onSave, onCancel }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -25,6 +26,16 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   const addStep = () => setSteps((s) => [...s, { text: '', checked: false }]);
   const updateStep = (i, patch) => setSteps((s) => s.map((st, j) => (j === i ? { ...st, ...patch } : st)));
   const removeStep = (i) => setSteps((s) => s.filter((_, j) => j !== i));
+
+  // Assignee choices: the namespace's members, plus the current user and the
+  // task's existing assignee so the pre-filled/legacy value is always
+  // selectable even if that person no longer holds a grant.
+  const assigneeOptions = useMemo(() => {
+    const names = new Set((users || []).map((u) => u.username).filter(Boolean));
+    if (currentUser) names.add(currentUser);
+    if (task?.assignee) names.add(task.assignee);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [users, currentUser, task]);
 
   const submit = () => {
     if (!title.trim()) { setErr('A title is required'); return; }
@@ -89,7 +100,10 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
             <input value={workload} placeholder="easy / medium / hard" onChange={(e) => setWorkload(e.target.value)} />
           </label>
           <label className="tb-modal-field">Assignee
-            <input value={assignee} placeholder="who realizes it" onChange={(e) => setAssignee(e.target.value)} />
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">—</option>
+              {assigneeOptions.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
           </label>
         </div>
 
