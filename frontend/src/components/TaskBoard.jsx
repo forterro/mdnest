@@ -8,7 +8,7 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
-import { getTasks, patchTask, saveBoard, createTask } from '../api';
+import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers } from '../api';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
 import './TaskBoard.css';
@@ -139,6 +139,9 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [scope, setScope] = useState('workspace');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState(null);
+  // Namespace members, to populate the assignee picker. Empty in single mode
+  // (endpoint absent) — the editor then falls back to a free-choice list.
+  const [nsUsers, setNsUsers] = useState([]);
 
   // The note-scoped view only makes sense with a note open.
   const effectiveScope = currentPath ? scope : 'workspace';
@@ -163,6 +166,16 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   }, [ns, effectiveScope, currentPath]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Load the namespace's members once per namespace for the assignee picker.
+  useEffect(() => {
+    let cancelled = false;
+    if (!ns) { setNsUsers([]); return undefined; }
+    getNamespaceUsers(ns)
+      .then((u) => { if (!cancelled) setNsUsers(Array.isArray(u) ? u : []); })
+      .catch(() => { if (!cancelled) setNsUsers([]); });
+    return () => { cancelled = true; };
+  }, [ns]);
 
   const setModePersist = useCallback((m) => {
     setMode(m);
@@ -392,6 +405,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           defaultColumn={editorTask ? editorTask.column : ''}
           notePaths={[...new Set(tasks.map((t) => t.path))]}
           currentUser={currentUser}
+          users={nsUsers}
           onSave={handleEditorSave}
           onCancel={() => setEditorOpen(false)}
         />

@@ -662,6 +662,12 @@ func main() {
 		if enableTaskBoard {
 			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
 			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
+			// Namespace members for the task assignee picker. Read-access gated:
+			// anyone who can see the namespace may list who else is on it.
+			if pg, ok := grantStore.(*store.PostgresGrantStore); ok {
+				teamHandler := handlers.NewTeamHandler(stg, pg)
+				mux.Handle("/api/namespace/users", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(teamHandler.HandleNamespaceUsers))))
+			}
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
