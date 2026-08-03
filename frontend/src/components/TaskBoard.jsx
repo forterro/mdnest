@@ -9,6 +9,7 @@ import {
   useDroppable,
 } from '@dnd-kit/core';
 import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers } from '../api';
+import { matchesTaskFilters } from '../taskFilters';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
 import './TaskBoard.css';
@@ -143,6 +144,13 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // (endpoint absent) — the editor then falls back to a free-choice list.
   const [nsUsers, setNsUsers] = useState([]);
 
+  // Client-side filters over the loaded tasks. They apply to every scope
+  // (workspace / this note) and both views (list / kanban) — filtering happens
+  // before the tasks are grouped into columns or notes.
+  const [search, setSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState([]); // selected tags (OR)
+  const [assigneeFilter, setAssigneeFilter] = useState(''); // '' | '@me' | '@unassigned' | <username>
+
   // The note-scoped view only makes sense with a note open.
   const effectiveScope = currentPath ? scope : 'workspace';
 
@@ -273,23 +281,47 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   const columns = board?.columns || [];
 
+  // Distinct tags and assignees present in the loaded tasks, for the filter UI.
+  const allTags = useMemo(() => {
+    const s = new Set();
+    for (const t of tasks) for (const tag of (t.tags || [])) s.add(tag);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [tasks]);
+  const assigneeChoices = useMemo(() => {
+    const s = new Set();
+    for (const t of tasks) if (t.assignee) s.add(t.assignee);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [tasks]);
+
+  const toggleTag = useCallback((tag) => {
+    setTagFilter((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
+  }, []);
+  const filtersActive = search.trim() !== '' || tagFilter.length > 0 || assigneeFilter !== '';
+  const clearFilters = useCallback(() => { setSearch(''); setTagFilter([]); setAssigneeFilter(''); }, []);
+
+  // Tasks after filters — every downstream view derives from this.
+  const filteredTasks = useMemo(
+    () => tasks.filter((t) => matchesTaskFilters(t, { search, tags: tagFilter, assignee: assigneeFilter, currentUser })),
+    [tasks, search, tagFilter, assigneeFilter, currentUser],
+  );
+
   const tasksByColumn = useMemo(() => {
     const map = {};
     for (const c of columns) map[c.id] = [];
-    for (const t of tasks) {
+    for (const t of filteredTasks) {
       (map[t.column] || (map[t.column] = [])).push(t);
     }
     return map;
-  }, [columns, tasks]);
+  }, [columns, filteredTasks]);
 
   const tasksByNote = useMemo(() => {
     const groups = new Map();
-    for (const t of tasks) {
+    for (const t of filteredTasks) {
       if (!groups.has(t.path)) groups.set(t.path, []);
       groups.get(t.path).push(t);
     }
     return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [tasks]);
+  }, [filteredTasks]);
 
   return (
     <div className="tb-panel" role="region" aria-label="Task board">
@@ -317,12 +349,54 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         </div>
       </div>
 
+      {!loading && tasks.length > 0 && (
+        <div className="tb-filters">
+          <input
+            className="tb-filter-search"
+            value={search}
+            placeholder="Filter by text…"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select
+            className="tb-filter-assignee"
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            title="Filter by assignee"
+          >
+            <option value="">All assignees</option>
+            {currentUser && <option value="@me">Me ({currentUser})</option>}
+            <option value="@unassigned">Unassigned</option>
+            {assigneeChoices.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+          {allTags.length > 0 && (
+            <div className="tb-filter-tags">
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`tb-filter-tag${tagFilter.includes(tag) ? ' active' : ''}`}
+                  onClick={() => toggleTag(tag)}
+                  title={`Filter by tag: ${tag}`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
+          {filtersActive && (
+            <button type="button" className="tb-filter-clear" onClick={clearFilters}>Clear</button>
+          )}
+        </div>
+      )}
+
       {error && <div className="tb-error">{error}</div>}
 
       {loading ? (
         <div className="tb-loading">Loading tasks…</div>
       ) : tasks.length === 0 ? (
         <div className="tb-empty">No task-list items found in this namespace. Add <code>- [ ] something</code> to a note.</div>
+      ) : filteredTasks.length === 0 ? (
+        <div className="tb-empty">No tasks match the current filters. <button type="button" className="tb-link-btn" onClick={clearFilters}>Clear filters</button></div>
       ) : mode === 'board' ? (
         <DndContext
           sensors={sensors}
