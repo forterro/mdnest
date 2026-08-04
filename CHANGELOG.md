@@ -6,6 +6,7 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
+<<<<<<< HEAD
 ### Added
 
 - **Edit your own comments.** The author (and only the author) can now revise a
@@ -34,6 +35,13 @@ All notable changes to mdnest are documented here.
   or marker-stripped note recovers the marker the path previously carried in git
   history, so its comments stay attached instead of being orphaned. A note's
   marker is also snapped back if an overwrite tries to change it.
+- **Marp decks are no longer corrupted by the Live editor.** A note whose
+  frontmatter declares `marp: true` is now always edited as raw text — the
+  Live/WYSIWYG editor is disabled for it, because round-tripping the markdown
+  through the editor's document model rewrote the frontmatter (`---` → `***`)
+  and slide separators and silently broke the deck on autosave. The Basic
+  editor (with the live slide preview alongside) is forced, and the "Live"
+  toggle is disabled with an explanatory tooltip while a Marp note is open.
 
 ---
 
