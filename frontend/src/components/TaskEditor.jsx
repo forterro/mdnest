@@ -5,7 +5,7 @@ import './TaskBoard.css';
 // (status/column, due, priority, workload, assignee, tags, steps, notes). It
 // emits a spec the backend renders to markdown, so the note stays the source of
 // truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, onSave, onCancel }) {
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, onSave, onCancel }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -26,6 +26,16 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   const addStep = () => setSteps((s) => [...s, { text: '', checked: false }]);
   const updateStep = (i, patch) => setSteps((s) => s.map((st, j) => (j === i ? { ...st, ...patch } : st)));
   const removeStep = (i) => setSteps((s) => s.filter((_, j) => j !== i));
+
+  // Existing tags offered as one-click chips next to the free-text input, so a
+  // task can be dropped onto one or more established tags without retyping.
+  const selectedTags = tags.split(',').map((t) => t.trim()).filter(Boolean);
+  const toggleTag = (tag) => {
+    const set = selectedTags.slice();
+    const i = set.indexOf(tag);
+    if (i >= 0) set.splice(i, 1); else set.push(tag);
+    setTags(set.join(', '));
+  };
 
   // Assignee choices: the namespace's members, plus the current user and the
   // task's existing assignee so the pre-filled/legacy value is always
@@ -109,6 +119,21 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
 
         <label className="tb-modal-field">Tags
           <input value={tags} placeholder="design, ui" onChange={(e) => setTags(e.target.value)} />
+          {(tagSuggestions || []).length > 0 && (
+            <div className="tb-editor-tag-suggest">
+              {tagSuggestions.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`tb-filter-tag${selectedTags.includes(tag) ? ' active' : ''}`}
+                  onClick={() => toggleTag(tag)}
+                  title={selectedTags.includes(tag) ? `Remove ${tag}` : `Add ${tag}`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
         </label>
 
         <label className="tb-check-field">

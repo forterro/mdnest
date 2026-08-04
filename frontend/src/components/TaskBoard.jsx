@@ -498,6 +498,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           notePaths={[...new Set(tasks.map((t) => t.path))]}
           currentUser={currentUser}
           users={nsUsers}
+          tagSuggestions={allTags}
           onSave={handleEditorSave}
           onCancel={() => setEditorOpen(false)}
         />

@@ -346,6 +346,12 @@
   color: #11111b;
   font-weight: 600;
 }
+.tb-editor-tag-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
 .tb-filter-clear {
   background: none;
   border: none;
