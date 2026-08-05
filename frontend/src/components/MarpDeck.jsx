@@ -130,7 +130,7 @@ export default function MarpDeck({ content, scrollPct, title }) {
     if (exporting) return;
     setExporting(kind);
     try {
-      if (kind === 'html') await exportHtml(content, themes, title);
+      if (kind === 'html') await exportHtml(content, title);
       else await exportPptx(content, themes, title);
     } catch (e) {
       // eslint-disable-next-line no-console
@@ -167,7 +167,7 @@ export default function MarpDeck({ content, scrollPct, title }) {
         <button type="button" onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous slide">‹</button>
         <span className="marp-deck-counter">{idx + 1} / {total}</span>
         <button type="button" onClick={() => go(1)} disabled={idx === total - 1} aria-label="Next slide">›</button>
-        <button type="button" className="marp-deck-export" onClick={() => doExport('html')} disabled={!!exporting} title="Export as a single self-contained HTML file">{exporting === 'html' ? '…' : 'HTML'}</button>
+        <button type="button" className="marp-deck-export" onClick={() => doExport('html')} disabled={!!exporting} title="Export as a standalone Marp presentation (navigation, fullscreen, presenter)">{exporting === 'html' ? '…' : 'HTML'}</button>
         <button type="button" className="marp-deck-export" onClick={() => doExport('pptx')} disabled={!!exporting} title="Export as PowerPoint (one image per slide, self-contained)">{exporting === 'pptx' ? '…' : 'PPTX'}</button>
         <button type="button" className="marp-deck-fs" onClick={toggleFullscreen} aria-label="Toggle fullscreen">⛶</button>
       </div>

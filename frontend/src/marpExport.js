@@ -7,7 +7,7 @@
 //     rasterized to PNG in the browser, and placed on a 16:9 slide. pptxgenjs
 //     is lazy-loaded so it never weighs on the normal app bundle.
 import { Marp } from '@marp-team/marp-core';
-import { getToken } from './api.js';
+import { getToken, exportMarpHtml } from './api.js';
 
 const SLIDE_W = 1280;
 const SLIDE_H = 720;
@@ -74,10 +74,6 @@ async function inlineAssets(html, css) {
   return { html: replaceAll(html), css: replaceAll(css) };
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
 function baseName(path) {
   const b = String(path || 'deck').split('/').pop() || 'deck';
   return b.replace(/\.md$/i, '') || 'deck';
@@ -94,23 +90,13 @@ function downloadBlob(filename, blob) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// buildStandaloneHtml returns a single self-contained HTML document string.
-export async function buildStandaloneHtml(content, themes, title) {
-  const { html, css } = renderWithThemes(content, themes);
-  const inlined = await inlineAssets(html, css);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">`
-    + `<meta name="viewport" content="width=device-width, initial-scale=1">`
-    + `<title>${escapeHtml(baseName(title))}</title><style>${inlined.css}\n`
-    + `html,body{margin:0;background:#0b0b12}`
-    + `.marpit>svg[data-marpit-svg]{display:block;width:100vw;height:auto;margin:0 auto}`
-    + `@media print{@page{size:${SLIDE_W}px ${SLIDE_H}px;margin:0}`
-    + `html,body{background:#fff}.marpit>svg[data-marpit-svg]{width:${SLIDE_W}px;height:${SLIDE_H}px;page-break-after:always}}`
-    + `</style></head><body>${inlined.html}</body></html>`;
-}
-
-export async function exportHtml(content, themes, title) {
-  const doc = await buildStandaloneHtml(content, themes, title);
-  downloadBlob(`${baseName(title)}.html`, new Blob([doc], { type: 'text/html;charset=utf-8' }));
+// exportHtml downloads a real, standalone Marp presentation. The rendering is
+// done server-side by the marp CLI (bespoke template: keyboard/touch
+// navigation, fullscreen, presenter view), so the result is a genuine,
+// self-contained deck rather than a static dump of slide images.
+export async function exportHtml(content, title) {
+  const blob = await exportMarpHtml(content, baseName(title));
+  downloadBlob(`${baseName(title)}.html`, blob);
 }
 
 // slideToPng makes one Marp slide SVG standalone (inlines the theme CSS) and

@@ -718,6 +718,14 @@ func main() {
 		}
 	}
 
+	// Marp deck export: render a note to a real, standalone Marp presentation via
+	// the marp CLI (bespoke template — navigation, fullscreen, presenter). Opt-in
+	// with Marp itself (ENABLE_MARP); needs the `marp` binary in the runtime image.
+	if enableMarp {
+		marpExportHandler := handlers.NewMarpExportHandler(stg)
+		mux.Handle("/api/marp/export", authMiddleware.Wrap(http.HandlerFunc(marpExportHandler.HandleHTML)))
+	}
+
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
