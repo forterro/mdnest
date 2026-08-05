@@ -14,6 +14,18 @@ All notable changes to mdnest are documented here.
 - **Resizable comment panel.** Drag the panel's left edge to widen or narrow it
   (persisted per browser), and the comment/reply/edit text areas can be resized
   vertically.
+- **Centralized Marp themes.** Decks can reference a shared theme by name
+  (`theme: forterro` in the frontmatter) instead of embedding a large per-deck
+  `style:` block, so brand styles are managed and evolve in one place. Themes
+  live in a reserved, hidden namespace, are readable by every deck in any
+  namespace, and are edited by superadmins from a new **Marp Themes** admin tab.
+  A built-in `forterro` theme is seeded on first start. (Requires `ENABLE_MARP`.)
+- **Export a Marp deck as a single, dependency-free file.** From the deck view:
+  - **HTML** — one self-contained `.html` (theme CSS and note images inlined),
+    openable offline in any browser;
+  - **PPTX** — one PowerPoint file with a full-bleed image per slide. Generated
+    entirely in the browser (pptxgenjs is lazy-loaded), so there is no server
+    dependency and the file is fully self-contained.
 
 ### Changed
 

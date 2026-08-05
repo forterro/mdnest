@@ -26,6 +26,7 @@
     "firebase": "^12.12.1",
     "marked": "^15.0.0",
     "mermaid": "^11.4.0",
+    "pptxgenjs": "^4.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
