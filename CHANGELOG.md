@@ -42,6 +42,15 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **StatefulSet upgrades no longer wedge GitOps reconciliation.** The writer and
+  backend `volumeClaimTemplates` carried the full common label set, which
+  includes `helm.sh/chart` and `app.kubernetes.io/version` — labels that change
+  on every release. Because `volumeClaimTemplates` is an immutable part of the
+  StatefulSet spec, each upgrade turned into an illegal update to an immutable
+  field, so server-side-apply dry-run rejected it and the deployment stalled in
+  a recurring comparison error. The persistent-volume templates now carry only
+  the release-invariant selector labels (name/instance/component), so version
+  bumps stop diffing the immutable spec.
 - **Comments no longer vanish when a note is deleted and recreated.** A note's
   identity (its hidden `mdnest:` marker, which links it to its
   `.mdnest/comments/<id>.jsonl` sidecar) is now reconciled on write: a recreated

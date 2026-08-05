@@ -181,7 +181,7 @@ spec:
     - metadata:
         name: notes
         labels:
-          {{- include "mdnest.labels" . | nindent 10 }}
+          {{- include "mdnest.selectorLabels" . | nindent 10 }}
           app.kubernetes.io/component: notes
         {{- with (merge (dict) .Values.persistence.notes.annotations .Values.commonAnnotations) }}
         annotations:
@@ -201,7 +201,7 @@ spec:
     - metadata:
         name: secrets
         labels:
-          {{- include "mdnest.labels" . | nindent 10 }}
+          {{- include "mdnest.selectorLabels" . | nindent 10 }}
           app.kubernetes.io/component: secrets
         {{- with (merge (dict) .Values.persistence.secrets.annotations .Values.commonAnnotations) }}
         annotations:
