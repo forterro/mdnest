@@ -748,19 +748,4 @@ export async function deleteMarpTheme(name) {
   return res.json();
 }
 
-// exportMarpHtml renders a deck to a standalone Marp presentation server-side
-// (via the marp CLI) and returns the HTML as a Blob for download.
-export async function exportMarpHtml(content, filename) {
-  const res = await request('/marp/export', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, filename }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Export failed');
-  }
-  return res.blob();
-}
-
 export { getToken, setToken, clearToken, PermissionError };

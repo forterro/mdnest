@@ -130,14 +130,14 @@ export default function MarpDeck({ content, scrollPct, title }) {
     if (exporting) return;
     setExporting('html');
     try {
-      await exportHtml(content, title);
+      await exportHtml(content, themes, title);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Marp export failed:', e);
     } finally {
       setExporting('');
     }
-  }, [content, title, exporting]);
+  }, [content, themes, title, exporting]);
 
   const srcDoc = useMemo(() => {
     if (!total) return '';

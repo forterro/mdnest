@@ -44,14 +44,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # Stage 2: Run
 FROM alpine:latest
 
-# ca-certificates/git/openssh-client: the git storage backend and remote mirror.
-# nodejs/npm + @marp-team/marp-cli: server-side "real Marp deck" HTML export
-# (bespoke template). PUPPETEER_SKIP_DOWNLOAD keeps Chromium out of the image —
-# HTML export never launches a browser (only PDF/PPTX/PNG would).
-RUN apk add --no-cache ca-certificates git openssh-client nodejs npm \
-    && PUPPETEER_SKIP_DOWNLOAD=true npm install -g @marp-team/marp-cli@4.5.0 \
-    && npm cache clean --force \
-    && rm -rf /root/.npm /tmp/*
+RUN apk add --no-cache ca-certificates git openssh-client
 
 WORKDIR /app
 

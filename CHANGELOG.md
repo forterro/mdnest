@@ -23,10 +23,12 @@ All notable changes to mdnest are documented here.
   namespace, and are edited by superadmins from a new **Marp Themes** admin tab.
   A neutral `starter` theme is seeded on first start when the catalog is empty.
 - **Export a Marp deck as a real, standalone presentation.** From the deck view,
-  export to a single self-contained `.html` rendered server-side by the marp CLI
-  (bespoke template): keyboard/touch navigation, fullscreen and presenter view,
-  opens offline in any browser. Centralized themes are resolved automatically.
-  (Requires `ENABLE_MARP`; the marp CLI ships in the backend image.)
+  export to a single self-contained `.html`: a genuine Marp *bespoke* deck
+  (keyboard/touch navigation, fullscreen and presenter view) that opens offline
+  in any browser. Rendered entirely in the browser with marp-core and wrapped in
+  marp-cli's bespoke player (vendored, MIT) — no server dependency and nothing
+  added to the backend image. Centralized themes are resolved and images inlined,
+  so the file is fully self-contained.
 
 ### Changed
 
