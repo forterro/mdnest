@@ -12,7 +12,7 @@ import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Marp } from '@marp-team/marp-core';
 import { slideStarts } from '../marp.js';
 import { getMarpThemes } from '../api.js';
-import { exportHtml, exportPptx } from '../marpExport.js';
+import { exportHtml } from '../marpExport.js';
 import './MarpDeck.css';
 
 // Centralized Marp themes are fetched once and shared across every deck (a
@@ -126,19 +126,18 @@ export default function MarpDeck({ content, scrollPct, title }) {
   }, []);
 
   const [exporting, setExporting] = useState('');
-  const doExport = useCallback(async (kind) => {
+  const doExport = useCallback(async () => {
     if (exporting) return;
-    setExporting(kind);
+    setExporting('html');
     try {
-      if (kind === 'html') await exportHtml(content, title);
-      else await exportPptx(content, themes, title);
+      await exportHtml(content, title);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Marp export failed:', e);
     } finally {
       setExporting('');
     }
-  }, [content, themes, title, exporting]);
+  }, [content, title, exporting]);
 
   const srcDoc = useMemo(() => {
     if (!total) return '';
@@ -167,8 +166,7 @@ export default function MarpDeck({ content, scrollPct, title }) {
         <button type="button" onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous slide">‹</button>
         <span className="marp-deck-counter">{idx + 1} / {total}</span>
         <button type="button" onClick={() => go(1)} disabled={idx === total - 1} aria-label="Next slide">›</button>
-        <button type="button" className="marp-deck-export" onClick={() => doExport('html')} disabled={!!exporting} title="Export as a standalone Marp presentation (navigation, fullscreen, presenter)">{exporting === 'html' ? '…' : 'HTML'}</button>
-        <button type="button" className="marp-deck-export" onClick={() => doExport('pptx')} disabled={!!exporting} title="Export as PowerPoint (one image per slide, self-contained)">{exporting === 'pptx' ? '…' : 'PPTX'}</button>
+        <button type="button" className="marp-deck-export" onClick={() => doExport()} disabled={!!exporting} title="Export as a standalone Marp presentation (navigation, fullscreen, presenter)">{exporting ? '…' : 'HTML'}</button>
         <button type="button" className="marp-deck-fs" onClick={toggleFullscreen} aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>

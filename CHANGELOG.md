@@ -22,15 +22,11 @@ All notable changes to mdnest are documented here.
   mirrored to a per-workspace git remote), are readable by every deck in any
   namespace, and are edited by superadmins from a new **Marp Themes** admin tab.
   A neutral `starter` theme is seeded on first start when the catalog is empty.
-- **Export a Marp deck as a single, dependency-free file.** From the deck view:
-  - **HTML** — a real, standalone Marp presentation rendered server-side by the
-    marp CLI (bespoke template): keyboard/touch navigation, fullscreen and
-    presenter view, in one self-contained `.html` that opens offline. Centralized
-    themes are resolved automatically. (Requires `ENABLE_MARP`; the marp CLI ships
-    in the backend image.)
-  - **PPTX** — one PowerPoint file with a full-bleed image per slide. Generated
-    entirely in the browser (pptxgenjs is lazy-loaded), so there is no server
-    dependency and the file is fully self-contained.
+- **Export a Marp deck as a real, standalone presentation.** From the deck view,
+  export to a single self-contained `.html` rendered server-side by the marp CLI
+  (bespoke template): keyboard/touch navigation, fullscreen and presenter view,
+  opens offline in any browser. Centralized themes are resolved automatically.
+  (Requires `ENABLE_MARP`; the marp CLI ships in the backend image.)
 
 ### Changed
 
