@@ -2164,6 +2164,12 @@ pre:hover .code-copy-btn {
   background: #74c7ec;
 }
 
+.modal-btn-primary:disabled {
+  background: #45475a;
+  color: #6c7086;
+  cursor: not-allowed;
+}
+
 .modal-wide {
   width: 500px;
   max-width: 95vw;

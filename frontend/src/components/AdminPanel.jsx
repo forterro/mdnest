@@ -1128,7 +1128,7 @@ function MarpThemesTab() {
             {err && <div className="admin-error">{err}</div>}
             {status && <div className="admin-hint">{status}</div>}
             <div className="marp-theme-actions">
-              <button onClick={save} disabled={busy || !name.trim() || !css.trim()}>
+              <button className="modal-btn-primary" onClick={save} disabled={busy || !name.trim() || !css.trim()}>
                 {busy ? 'Saving…' : 'Save'}
               </button>
             </div>
