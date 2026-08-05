@@ -4,6 +4,21 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Namespace admins can now grant access to any user, not just users who
+  already have access.** The admin panel's user list (Access Grants and
+  Namespace Admins tabs) was filtered to people already present on the admin's
+  namespaces — a chicken-and-egg that made it impossible for a namespace admin
+  to give a colleague their *first* access. Namespace admins now see the full
+  user directory. Mutating actions stay gated: role changes and user deletion
+  remain superadmin-only, and grant / co-admin writes are still scoped to the
+  caller's own namespaces server-side.
+
+---
+
 ## v4.1.2 — `mdnest list` you can actually read
 
 Patch release fixing GitHub issue #87, reported from Fedora 44. Both halves of
