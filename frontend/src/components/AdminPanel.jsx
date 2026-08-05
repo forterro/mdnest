@@ -27,7 +27,7 @@ import {
 import { clearMarpThemeCache } from './MarpDeck.jsx';
 import PathPicker from './PathPicker.jsx';
 
-function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local', grantMaxDepth = 0, marpEnabled = false }) {
+function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local', grantMaxDepth = 0, marpThemesEnabled = false }) {
   const [tab, setTab] = useState('users');
 
   // Management-plane namespace list. A superadmin no longer has implicit data
@@ -71,7 +71,7 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
         {isSuperAdmin && (
           <button className={tab === 'workspaces' ? 'active' : ''} onClick={() => setTab('workspaces')}>Git Workspaces</button>
         )}
-        {isSuperAdmin && marpEnabled && (
+        {isSuperAdmin && marpThemesEnabled && (
           <button className={tab === 'marp-themes' ? 'active' : ''} onClick={() => setTab('marp-themes')}>Marp Themes</button>
         )}
       </div>
@@ -79,7 +79,7 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
       {tab === 'grants' && <GrantsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
       {tab === 'workspaces' && isSuperAdmin && <WorkspacesTab />}
-      {tab === 'marp-themes' && isSuperAdmin && marpEnabled && <MarpThemesTab />}
+      {tab === 'marp-themes' && isSuperAdmin && marpThemesEnabled && <MarpThemesTab />}
     </div>
   );
 }
@@ -1088,7 +1088,7 @@ function MarpThemesTab() {
 
   return (
     <div className="marp-themes-tab">
-      <div className="admin-section-head">
+      <div className="admin-section-header">
         <h3>Marp Themes</h3>
         <button onClick={openNew}>+ New theme</button>
       </div>

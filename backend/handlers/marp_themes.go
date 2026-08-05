@@ -14,12 +14,14 @@ import (
 	"github.com/mdnest/mdnest/backend/storage"
 )
 
-// defaultForterroTheme is the built-in theme seeded into the catalog on first
-// start. Admins can edit or delete it afterwards (the seed never overwrites an
-// existing theme of the same name).
+// starterTheme is a neutral example theme seeded into the catalog on first
+// start (when theme management is enabled). Admins can edit, rename (create a
+// copy), or delete it; the seed never overwrites an existing theme of the same
+// name, and it only seeds when the catalog is empty so a deleted starter does
+// not reappear once you have your own themes.
 //
-//go:embed marp_forterro.css
-var defaultForterroTheme string
+//go:embed marp_starter.css
+var starterTheme string
 
 // maxThemeBytes caps a single theme stylesheet.
 const maxThemeBytes = 512 * 1024
@@ -160,18 +162,19 @@ func (h *MarpThemeHandler) remove(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
-// SeedDefault writes the built-in Forterro theme if the catalog has no theme of
-// that name yet. Idempotent: an admin's later edits are never overwritten. Best
-// effort — a failure is logged, not fatal.
+// SeedDefault writes the neutral starter theme, but only when the catalog is
+// completely empty — so a first-run instance has a working example, while an
+// admin who deleted it (and has their own themes) never sees it come back.
+// Idempotent and best effort: failures are logged, not fatal.
 func (h *MarpThemeHandler) SeedDefault(ctx context.Context) {
-	const name = "forterro"
-	if _, err := h.store.ReadFile(ctx, storage.SystemNamespaceMarpThemes, name+".css"); err == nil {
-		return // already present — respect admin edits
+	const name = "starter"
+	if existing, err := h.readAll(ctx); err == nil && len(existing) > 0 {
+		return // catalog already has themes — don't reintroduce the starter
 	}
 	_ = h.store.MkdirAll(ctx, storage.SystemNamespaceMarpThemes, "")
-	if err := h.store.WriteFile(ctx, storage.SystemNamespaceMarpThemes, name+".css", []byte(defaultForterroTheme)); err != nil {
+	if err := h.store.WriteFile(ctx, storage.SystemNamespaceMarpThemes, name+".css", []byte(starterTheme)); err != nil {
 		log.Printf("marp themes: seed %q failed: %v", name, err)
 		return
 	}
-	log.Printf("marp themes: seeded default theme %q", name)
+	log.Printf("marp themes: seeded starter theme %q", name)
 }
