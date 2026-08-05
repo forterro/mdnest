@@ -6,7 +6,6 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
-<<<<<<< HEAD
 ### Added
 
 - **Edit your own comments.** The author (and only the author) can now revise a
@@ -42,6 +41,14 @@ All notable changes to mdnest are documented here.
   and slide separators and silently broke the deck on autosave. The Basic
   editor (with the live slide preview alongside) is forced, and the "Live"
   toggle is disabled with an explanatory tooltip while a Marp note is open.
+- **Namespace admins can now grant access to any user, not just users who
+  already have access.** The admin panel's user list (Access Grants and
+  Namespace Admins tabs) was filtered to people already present on the admin's
+  namespaces — a chicken-and-egg that made it impossible for a namespace admin
+  to give a colleague their *first* access. Namespace admins now see the full
+  user directory. Mutating actions stay gated: role changes and user deletion
+  remain superadmin-only, and grant / co-admin writes are still scoped to the
+  caller's own namespaces server-side.
 
 ---
 
