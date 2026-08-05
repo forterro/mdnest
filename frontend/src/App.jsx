@@ -1394,6 +1394,7 @@ function App() {
       adminNamespaces={adminNamespaces}
       userProvider={appConfig?.userProvider || 'local'}
       grantMaxDepth={appConfig?.grantMaxDepth || 0}
+      marpEnabled={!!appConfig?.marp}
     />;
   }
 

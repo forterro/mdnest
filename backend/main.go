@@ -698,6 +698,21 @@ func main() {
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}
 
+	// Centralized Marp themes: a global, read-for-all / write-for-superadmin
+	// catalog stored in a reserved hidden namespace. Decks reference a theme by
+	// name (`theme: forterro`) instead of embedding a per-deck style block.
+	// Available in both single and multi mode whenever Marp is enabled.
+	if enableMarp {
+		marpThemeHandler := handlers.NewMarpThemeHandler(stg)
+		mux.Handle("/api/marp/themes", authMiddleware.Wrap(http.HandlerFunc(marpThemeHandler.Handle)))
+		// Seed the built-in theme once, from the node that owns the tree
+		// (single or writer). App replicas read it from the coherence tier
+		// after the writer hydrates the reserved namespace.
+		if env("MDNEST_ROLE", "single") != "app" {
+			marpThemeHandler.SeedDefault(context.Background())
+		}
+	}
+
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
