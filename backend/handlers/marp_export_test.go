@@ -4,7 +4,7 @@ import "testing"
 
 func TestExportBaseName(t *testing.T) {
 	cases := map[string]string{
-		"marp-forterro-demo.md": "marp-forterro-demo",
+		"quarterly-review.md": "quarterly-review",
 		"decks/quarterly.md":    "quarterly",
 		`..\..\etc\passwd`:      "passwd",
 		`evil".md`:              "evil",

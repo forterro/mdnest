@@ -31,10 +31,10 @@ func TestMarpThemeHandler(t *testing.T) {
 	super := &middleware.UserContext{ID: 1, Username: "root", Role: "superadmin"}
 	collab := &middleware.UserContext{ID: 2, Username: "bob", Role: "collaborator"}
 
-	css := `/* @theme forterro */ section { color: #111; }`
+	css := `/* @theme sample */ section { color: #111; }`
 
 	// A non-superadmin cannot write a theme.
-	if w := themeReq(h, http.MethodPost, "", `{"name":"forterro","css":"x"}`, collab); w.Code != http.StatusForbidden {
+	if w := themeReq(h, http.MethodPost, "", `{"name":"sample","css":"x"}`, collab); w.Code != http.StatusForbidden {
 		t.Fatalf("collab write: want 403, got %d (%s)", w.Code, w.Body.String())
 	}
 
@@ -44,7 +44,7 @@ func TestMarpThemeHandler(t *testing.T) {
 	}
 
 	// Superadmin upsert succeeds.
-	if w := themeReq(h, http.MethodPost, "", `{"name":"forterro","css":`+jsonStr(css)+`}`, super); w.Code != http.StatusOK {
+	if w := themeReq(h, http.MethodPost, "", `{"name":"sample","css":`+jsonStr(css)+`}`, super); w.Code != http.StatusOK {
 		t.Fatalf("upsert: want 200, got %d (%s)", w.Code, w.Body.String())
 	}
 
@@ -57,12 +57,12 @@ func TestMarpThemeHandler(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got) != 1 || got[0].Name != "forterro" || got[0].CSS != css {
-		t.Fatalf("want 1 theme forterro with css, got %+v", got)
+	if len(got) != 1 || got[0].Name != "sample" || got[0].CSS != css {
+		t.Fatalf("want 1 theme sample with css, got %+v", got)
 	}
 
 	// Delete (superadmin) then the catalog is empty.
-	if w := themeReq(h, http.MethodDelete, "name=forterro", "", super); w.Code != http.StatusOK {
+	if w := themeReq(h, http.MethodDelete, "name=sample", "", super); w.Code != http.StatusOK {
 		t.Fatalf("delete: want 200, got %d", w.Code)
 	}
 	w = themeReq(h, http.MethodGet, "", "", super)

@@ -1114,7 +1114,7 @@ function MarpThemesTab() {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="forterro"
+                placeholder="my-theme"
                 disabled={selected !== '__new__'}
               />
             </label>
