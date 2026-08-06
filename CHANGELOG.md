@@ -4,6 +4,26 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Role-based access "Groups" (multi mode).** A new superadmin-managed
+  **Groups** admin tab lets you define named groups whose members are mdnest
+  users and/or IdP (OIDC) group IDs, and grant those groups read/write access
+  to namespaces (with the same path scoping as per-user grants). A user's
+  effective access is the **union** of their own grants and the grants of every
+  group they belong to — directly, or through an OIDC group ID carried in their
+  login token. OIDC-group membership is read from a configurable ID-token claim
+  (`OIDC_GROUPS_CLAIM`, e.g. `groups` on Entra ID) and snapshotted at login, so
+  a change at the IdP applies on the member's next sign-in; direct user
+  membership takes effect immediately. Each OIDC-group member can carry an
+  optional display label (reference only — matching is always on the group ID).
+  Fully additive and opt-in: with no groups defined and `OIDC_GROUPS_CLAIM`
+  unset, behaviour is unchanged.
+
+---
+
 ## v4.1.2 — `mdnest list` you can actually read
 
 Patch release fixing GitHub issue #87, reported from Fedora 44. Both halves of
