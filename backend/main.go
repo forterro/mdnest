@@ -304,6 +304,7 @@ func main() {
 				RedirectURL:    redirect,
 				AllowedDomains: domains,
 				CookieSecret:   []byte(jwtSecret),
+				GroupsClaim:    env("OIDC_GROUPS_CLAIM", ""),
 			})
 			if err != nil {
 				log.Fatalf("failed to init SSO client: %v", err)
@@ -344,12 +345,14 @@ func main() {
 	var perms *middleware.PermissionChecker
 	var grantStore store.GrantStore
 	var nsAdminStore store.NamespaceAdminStore
+	var groupStore store.GroupStore
 	var workspaceStore store.WorkspaceStore
 	var noteActivityStore store.NoteActivityStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
-		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
+		groupStore = store.NewPostgresGroupStore(db)
+		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore, groupStore)
 		noteActivityStore = store.NewPostgresNoteActivityStore(db)
 
 		// Per-workspace git remote overrides: the store decrypts credentials and
@@ -747,6 +750,13 @@ func main() {
 		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
 		mux.Handle("/api/admin/workspace-groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleGroups))))
 		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
+
+		// Role-based access "Groups": superadmin-only management of named sets
+		// (users + OIDC group IDs) and their namespace grants.
+		groupsHandler := handlers.NewGroupsHandler(groupStore)
+		mux.Handle("/api/admin/groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleGroups))))
+		mux.Handle("/api/admin/groups/members", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleMembers))))
+		mux.Handle("/api/admin/groups/grants", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleGrants))))
 
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);
 		// PUT/DELETE (role change, user delete) are SuperAdmin-only —
