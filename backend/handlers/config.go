@@ -124,7 +124,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"liveCollab":   h.liveCollab,
 		"require2FA":   h.require2FA,
 		"userProvider": h.userProvider,
-		"version":      "4.1.2-forterro.26",
+		"version":      "4.1.2-forterro.27",
 		"commit":       Commit,
 		"buildTime":    BuildTime,
 	}
