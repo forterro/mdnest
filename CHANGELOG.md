@@ -8,6 +8,11 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **Task board: mobile-friendly toolbar and collapsible columns.** The board
+  toolbar now wraps so its controls stack on narrow (phone) screens instead of
+  overflowing, and each kanban column can be collapsed to a slim vertical rail
+  (state persisted per namespace) — the Done column is collapsed by default the
+  first time a board is shown.
 - **Role-based access "Groups" (multi mode).** A new superadmin-managed
   **Groups** admin tab lets you define named groups whose members are mdnest
   users and/or IdP (OIDC) group IDs, and grant those groups read/write access
