@@ -1,6 +1,6 @@
 # mdnest
 
-![Version: 0.3.1](https://img.shields.io/badge/Version-0.3.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.1.2-forterro.17](https://img.shields.io/badge/AppVersion-4.1.2--forterro.17-informational?style=flat-square)
+![Version: 0.3.2](https://img.shields.io/badge/Version-0.3.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.1.2-forterro.27](https://img.shields.io/badge/AppVersion-4.1.2--forterro.27-informational?style=flat-square)
 
 mdnest — self-hosted Markdown knowledge base with live collaboration.
 Standard-Kubernetes chart (no CRDs). PostgreSQL and Redis are expected to be
@@ -355,7 +355,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Create a ServiceAccount for the workloads. |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount; generated when empty and `create=true`. |
-| sso | object | `{"adminEmails":"","allowedDomains":"","autoProvisionUsers":false,"clientId":"","clientSecret":"","enabled":false,"existingSecret":"","issuerUrl":"","providerLabel":"SSO","redirectUrl":"","secretKeys":{"clientSecret":"SSO_CLIENT_SECRET"}}` | --------------------------------------------------------------------------- |
+| sso | object | `{"adminEmails":"","allowedDomains":"","autoProvisionUsers":false,"clientId":"","clientSecret":"","enabled":false,"existingSecret":"","groupsClaim":"","issuerUrl":"","providerLabel":"SSO","redirectUrl":"","secretKeys":{"clientSecret":"SSO_CLIENT_SECRET"}}` | --------------------------------------------------------------------------- |
 | sso.adminEmails | string | `""` | Comma-separated emails auto-promoted to superadmin. |
 | sso.allowedDomains | string | `""` | Comma-separated list of allowed email domains. |
 | sso.autoProvisionUsers | bool | `false` | Opt-in: auto-create a least-privilege collaborator for an unknown but IdP-authenticated email on first login, instead of rejecting it. Off by default. Enable only when the IdP itself gates who may obtain a token (e.g. a domain-restricted enterprise IdP); pair with `allowedDomains`. |
@@ -363,6 +363,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | sso.clientSecret | string | `""` | Inline OIDC client secret (used only when `existingSecret` is empty). |
 | sso.enabled | bool | `false` | Enable SSO/OIDC login (`USER_PROVIDER=sso`; otherwise `local`). |
 | sso.existingSecret | string | `""` | Existing Secret holding the OIDC client secret (preferred over inline). |
+| sso.groupsClaim | string | `""` | ID-token claim carrying the user's IdP group IDs, enabling access "Groups" membership via OIDC groups (e.g. "groups" on Entra ID). Empty disables OIDC-group resolution; direct user membership still works. Note: OIDC-group membership is snapshotted at login, so IdP group changes (e.g. offboarding) only apply at next login, bounded to the SSO session lifetime (12h); direct user membership is revoked immediately. |
 | sso.issuerUrl | string | `""` | OIDC issuer URL. |
 | sso.providerLabel | string | `"SSO"` | Label shown on the SSO login button. |
 | sso.redirectUrl | string | `""` | OAuth redirect URL; defaults to `<frontendOrigin>/api/auth/sso/callback`. |
