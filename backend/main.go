@@ -669,6 +669,7 @@ func main() {
 		// mutation just like /api/note.
 		if enableTaskBoard {
 			taskHandler.SetNamespaceFilter(perms.FilterNamespaces)
+			taskHandler.SetCanWrite(perms.CheckWrite)
 			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
 			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
 			// Cross-namespace view: aggregates the caller's accessible namespaces.
@@ -697,6 +698,7 @@ func main() {
 		mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
 		mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
 		if enableTaskBoard {
+			taskHandler.SetCanWrite(func(_ *http.Request, _, _ string) bool { return true })
 			mux.Handle("/api/tasks", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks))))
 			mux.Handle("/api/board", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleBoard)))
 			// Single mode: one user owns every namespace, so the global view

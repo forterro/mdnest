@@ -41,6 +41,12 @@ type TaskHandler struct {
 	// where every namespace is accessible. Used by the global (cross-namespace)
 	// task view to enforce access.
 	nsFilter func(r *http.Request, namespaces []string) []string
+	// canWrite reports whether the request's user may write the given
+	// namespace/path. create writes to a note named in the request body, which
+	// the path-based route middleware cannot see, so it re-checks the real
+	// target here. Set in multi mode (perms.CheckWrite); a nil checker fails
+	// closed, so single mode installs a pass-through.
+	canWrite func(r *http.Request, ns, path string) bool
 }
 
 // NewTaskHandler creates a task/board handler backed by the given storage.
@@ -53,6 +59,13 @@ func NewTaskHandler(store storage.Storage) *TaskHandler {
 // namespaces are the caller's).
 func (h *TaskHandler) SetNamespaceFilter(f func(r *http.Request, namespaces []string) []string) {
 	h.nsFilter = f
+}
+
+// SetCanWrite installs the per-request write-access check used by create to
+// authorize the note named in the request body. Multi mode passes
+// perms.CheckWrite; single mode passes a pass-through.
+func (h *TaskHandler) SetCanWrite(f func(r *http.Request, ns, path string) bool) {
+	h.canWrite = f
 }
 
 // BoardColumn is a single kanban column. Status is the value written to a task's
@@ -535,6 +548,19 @@ func detailBlockRange(lines []string, cardIdx int) (int, int) {
 	return start, j
 }
 
+// hasUnresolvedSteps reports whether the task at cardIdx has at least one
+// unchecked nested step in its detail block. Used to block closing a task while
+// its sub-tasks are still open.
+func hasUnresolvedSteps(lines []string, cardIdx int) bool {
+	start, end := detailBlockRange(lines, cardIdx)
+	for j := start; j < end; j++ {
+		if checked, _, ok := parseTaskLine(lines[j]); ok && !checked {
+			return true
+		}
+	}
+	return false
+}
+
 // parseNoteTasks aggregates the task-list items of one note. A checkbox that is
 // not nested in another task's detail block is a card; any checkbox inside a
 // detail block is a step of that card. Fenced code blocks are opaque (their
@@ -983,6 +1009,13 @@ func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid note path"}`, http.StatusBadRequest)
 		return
 	}
+	// The route middleware authorized the query path, but the note target comes
+	// from the body — re-check write access on the actual note we're about to
+	// touch so a partial-write grant can't be aimed at another note.
+	if h.canWrite == nil || !h.canWrite(r, ns, relPath) {
+		http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
+		return
+	}
 	// Append the rendered task, creating the note if it does not exist yet.
 	data, _ := h.store.ReadFile(ctx, ns, relPath)
 	var lines []string
@@ -1204,6 +1237,21 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	board := h.loadBoard(ctx, ns)
+	// Block closing a task while it still has unresolved sub-tasks. Closing is
+	// either checking it done or moving it to a Done column.
+	closing := mut.Checked != nil && *mut.Checked
+	if !closing && mut.ToColumn != "" {
+		for _, c := range board.Columns {
+			if c.ID == mut.ToColumn && c.Done {
+				closing = true
+				break
+			}
+		}
+	}
+	if closing && hasUnresolvedSteps(lines, mut.Line-1) {
+		http.Error(w, `{"error":"resolve all sub-tasks before closing this task"}`, http.StatusUnprocessableEntity)
+		return
+	}
 	if mut.Replace != nil {
 		// Preserve the task's stable ref across an edit, backfilling one for
 		// tasks created before refs existed.
