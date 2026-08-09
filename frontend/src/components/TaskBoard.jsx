@@ -8,7 +8,7 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
-import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTasks } from '../api';
+import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTasks, deleteTask } from '../api';
 import { matchesTaskFilters } from '../taskFilters';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
@@ -28,7 +28,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 // titles (Option A: reference by title, resolved best-effort in the loaded set).
 const REL_ICON = { 'depends-on': '⬆', 'blocked-by': '⛔', 'related-to': '🔗' };
 
-function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve }) {
+function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
@@ -132,6 +132,10 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve }) {
           <button type="button" className="tb-expand" onPointerDown={noSwallow}
             onClick={(e) => { e.stopPropagation(); onEdit(task); }}>✎ edit</button>
         )}
+        {canWrite && onDelete && (
+          <button type="button" className="tb-card-delete" title="Delete task" onPointerDown={noSwallow}
+            onClick={(e) => { e.stopPropagation(); if (confirm(`Delete task “${task.text || '(empty)'}”? This removes it from ${task.path}.`)) onDelete(task); }}>🗑</button>
+        )}
         <button type="button" className="tb-card-source" title={`Open ${task.path}`} onPointerDown={noSwallow}
           onClick={(e) => { e.stopPropagation(); onOpen(task.path); }}>
           {task.path}
@@ -141,7 +145,7 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve }) {
   );
 }
 
-function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, resolve, collapsed, onToggleCollapse }) {
+function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete, collapsed, onToggleCollapse }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   return (
     <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}${collapsed ? ' collapsed' : ''}`}>
@@ -161,7 +165,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, re
       {!collapsed && (
         <div className="tb-column-body">
           {tasks.map((t) => (
-            <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} resolve={resolve} />
+            <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} resolve={resolve} onDelete={onDelete} />
           ))}
           {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
         </div>
@@ -360,6 +364,18 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   const openEdit = useCallback((task) => { setEditorTask(task); setEditorOpen(true); }, []);
   const openCreate = useCallback(() => { setEditorTask(null); setEditorOpen(true); }, []);
+
+  // Delete a task: optimistic removal, resync from the server on any error.
+  const handleDelete = useCallback(async (task) => {
+    const key = cardKey(task);
+    setTasks((cur) => cur.filter((t) => cardKey(t) !== key));
+    try {
+      await deleteTask(task.namespace || ns, task.path, task.line, task.raw);
+    } catch (e) {
+      setError(e.message);
+      await reload();
+    }
+  }, [ns, reload]);
 
   // Create (append) or replace a whole task from the editor's spec.
   const handleEditorSave = useCallback(async (spec, note) => {
@@ -662,6 +678,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 onToggleStep={handleToggleStep}
                 onEdit={openEdit}
                 resolve={resolveTitle}
+                onDelete={handleDelete}
                 collapsed={!!collapsedCols && collapsedCols.has(col.id)}
                 onToggleCollapse={() => toggleCollapse(col.id)}
               />
@@ -702,6 +719,10 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                     </label>
                     {canWrite && (
                       <button type="button" className="tb-expand" onClick={() => openEdit(t)} title="Edit task">✎</button>
+                    )}
+                    {canWrite && (
+                      <button type="button" className="tb-card-delete" title="Delete task"
+                        onClick={() => { if (confirm(`Delete task “${t.text || '(empty)'}”? This removes it from ${t.path}.`)) handleDelete(t); }}>🗑</button>
                     )}
                   </li>
                 ))}
