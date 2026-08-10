@@ -1625,6 +1625,7 @@ function App() {
                       docPath={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
                       onChange={canWriteCurrent ? handleContentChange : null}
                       readOnly={!canWriteCurrent}
+                      libraries={appConfig?.excalidrawLibraries}
                     />
                   </Suspense>
                 )}
