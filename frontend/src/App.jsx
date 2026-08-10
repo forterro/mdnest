@@ -308,6 +308,11 @@ function App() {
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  // Bumped only on remote-driven reloads (another user's save/restore, or an
+  // explicit Reload). The Excalidraw editor is keyed on it so its canvas remounts
+  // with the fresh scene — otherwise a drawing would keep the stale scene and
+  // the next stroke would silently overwrite the remote change (LWW).
+  const [drawingReloadKey, setDrawingReloadKey] = useState(0);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -452,6 +457,9 @@ function App() {
             setContent(text);
             setSavedContent(text);
             etagRef.current = etag;
+            // Remount the drawing canvas so it shows the remote scene, not the
+            // stale one it was mounted with.
+            setDrawingReloadKey((k) => k + 1);
             if (isRestore) {
               // Show a brief info banner so the user knows their
               // content updated because of an explicit restore by
@@ -1382,6 +1390,7 @@ function App() {
       setContent(text);
       setSavedContent(text);
       etagRef.current = etag;
+      setDrawingReloadKey((k) => k + 1);
       setConflictBanner(null);
     } catch (e) {
       console.error('Failed to reload:', e);
@@ -1611,9 +1620,9 @@ function App() {
                 ) : (
                   <Suspense fallback={<div className="editor-loading">Loading drawing editor…</div>}>
                     <ExcalidrawEditor
-                      key={`${selectedNs}/${currentPath}`}
+                      key={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
                       content={content}
-                      docPath={`${selectedNs}/${currentPath}`}
+                      docPath={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
                       onChange={canWriteCurrent ? handleContentChange : null}
                       readOnly={!canWriteCurrent}
                     />
