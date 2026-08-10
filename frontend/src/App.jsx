@@ -1093,6 +1093,23 @@ function App() {
     }
   }, [selectedNs, getTargetDir, refreshTree, openNote]);
 
+  // Create an empty Excalidraw drawing and open it in the drawing editor.
+  const doCreateDrawing = useCallback(async (target) => {
+    if (!selectedNs) return;
+    let name = prompt('Drawing name (e.g. sketch.excalidraw.md):');
+    if (!name) return;
+    if (!isExcalidrawDoc(name)) name += '.excalidraw.md';
+    const dir = getTargetDir(target);
+    const path = dir + name.replace(/^\/+/, '');
+    try {
+      await createNote(selectedNs, path);
+      await refreshTree(undefined, { broadcast: true });
+      openNote(path);
+    } catch (e) {
+      alert('Failed to create drawing: ' + e.message);
+    }
+  }, [selectedNs, getTargetDir, refreshTree, openNote]);
+
   const doCreateFolder = useCallback(async (target) => {
     if (!selectedNs) return;
     const name = prompt('Folder name:');
@@ -1110,6 +1127,7 @@ function App() {
   const handleContextAction = useCallback(async (action, target) => {
     switch (action) {
       case 'new-note': await doCreateNote(target); break;
+      case 'new-drawing': await doCreateDrawing(target); break;
       case 'new-folder': await doCreateFolder(target); break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
@@ -1231,7 +1249,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateFolder, getLastPath, setLastPath]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -1452,6 +1470,7 @@ function App() {
         onLogout={logout}
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
+        onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
@@ -1788,6 +1807,7 @@ function App() {
         canWrite={canWrite}
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
+        excalidraw={excalidrawEnabled}
       />
       {showReleaseNotes && appConfig?.latestRelease && (
         <ReleaseNotesModal
