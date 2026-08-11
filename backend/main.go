@@ -457,7 +457,7 @@ func main() {
 		noteHandler.SetIdentityResolver(handlers.NewCachedIdentityResolver(userStore))
 		attributionHandler = handlers.NewAttributionHandler(stg, noteActivityStore)
 	}
-	treeHandler := handlers.NewTreeHandler(stg, grantStore)
+	treeHandler := handlers.NewTreeHandler(stg, grantStore, groupStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
 	// Stateless app replicas own no attachment bytes: proxy attachment traffic
 	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
