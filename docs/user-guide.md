@@ -369,6 +369,34 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 
 ---
 
+## Frontmatter
+
+A note can start with a YAML frontmatter block to carry a small set of display metadata:
+
+```markdown
+---
+title: My Note
+author: Alice
+icon: md:cog
+type: basic
+tags:
+  - infra
+  - k8s
+---
+
+# Body starts here
+```
+
+Read-only: mdnest reads this block but never writes or rewrites it — you author it by hand, the same way you'd add `marp: true` for a slide deck.
+
+- `title` — overrides the name shown in the file tree and the browser tab title. It never changes the path shown at the top of the editor when the note is open — that always reflects the real file path.
+- `author` — free text; defaults to your username if omitted. Not shown in the UI yet.
+- `icon` — a [Pictogrammers MDI](https://pictogrammers.com/library/mdi/) reference in the form `md:<icon-name>` (e.g. `md:cog`). Shown next to the file in the tree and next to the path when the note is open. Fetched live from a public CDN — invalid or unreachable icons are simply omitted.
+- `type` — a hint about the kind of note (`basic`, `marp`, `excalidraw`). `type: marp` and `type: excalidraw` are recognized as alternate triggers for the Marp deck view and the Excalidraw drawing editor described below, in addition to their existing detection (`marp: true` / a `.excalidraw.md` filename) — so a drawing or deck doesn't have to live at a `*.excalidraw.md` path to open in the right view.
+- `tags` — a YAML list, shown as small capsules next to the path when the note is open. Not used for search.
+
+---
+
 ## Task Board
 
 > Slides: a note whose frontmatter declares `marp: true` renders as a

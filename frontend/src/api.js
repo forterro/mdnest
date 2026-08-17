@@ -201,7 +201,16 @@ export async function getNote(ns, path) {
   const text = await res.text();
   const etag = res.headers.get('ETag');
   const noteId = res.headers.get('X-Note-ID');
-  return { text, etag, noteId };
+  let frontmatter = null;
+  const fmHeader = res.headers.get('X-Frontmatter');
+  if (fmHeader) {
+    try {
+      frontmatter = JSON.parse(atob(fmHeader));
+    } catch {
+      frontmatter = null;
+    }
+  }
+  return { text, etag, noteId, frontmatter };
 }
 
 export async function saveNote(ns, path, content, ifMatch, opts = {}) {

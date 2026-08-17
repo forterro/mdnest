@@ -6,6 +6,7 @@ import { resolveWikiLink, wikiLinkExtension, internalMdLinkHtml } from '../wikil
 import { sanitizeHtml, sanitizeSvg } from '../sanitize.js';
 import { extractDiagramText, copyPlainText } from '../mermaid-text.js';
 import { isExcalidrawDoc, noteRelativePath } from '../excalidraw.js';
+import { stripFrontmatterBlock } from '../frontmatter.js';
 import { getNote } from '../api.js';
 
 
@@ -173,7 +174,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
   const [viewerSvg, setViewerSvg] = useState(null);
 
   const html = useMemo(
-    () => renderMarkdown(content || '', ns, currentPath, pathIndex),
+    () => renderMarkdown(stripFrontmatterBlock(content || ''), ns, currentPath, pathIndex),
     [content, ns, currentPath, pathIndex]
   );
 

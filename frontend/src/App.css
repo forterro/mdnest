@@ -326,6 +326,25 @@
   font-weight: 500;
 }
 
+/* Frontmatter `icon:`/`tags:` — shown next to the path, never replacing it. */
+.toolbar-frontmatter-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: #89b4fa;
+}
+.toolbar-tags {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.toolbar-tag-chip {
+  font-size: 0.8em;
+  color: #cdd6f4;
+}
+
 .toolbar button {
   padding: 0.35rem 0.75rem;
   background: #313244;
@@ -893,6 +912,32 @@
 
 .tree-row.active .tree-icon-svg.file {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2389b4fa22' stroke='%2389b4fa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3Cline x1='8' y1='13' x2='16' y2='13'/%3E%3Cline x1='8' y1='17' x2='16' y2='17'/%3E%3C/svg%3E");
+}
+
+/* Frontmatter `icon:` replaces the default file icon in the tree (falls back
+   to it while loading or on fetch failure — see FrontmatterIcon.jsx). Sized
+   to match .tree-icon-svg so the row doesn't jitter when it swaps in. */
+.tree-frontmatter-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  flex-shrink: 0;
+  color: #6c7086;
+}
+.tree-row.active .tree-frontmatter-icon {
+  color: #89b4fa;
+}
+
+/* Shared base for FrontmatterIcon.jsx's inlined SVG (tree + toolbar). The
+   fetched MDI svg doesn't set fill itself, so it inherits the theme color. */
+.frontmatter-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.frontmatter-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
 }
 
 .tree-label {

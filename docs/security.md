@@ -234,6 +234,8 @@ Stripped: event-handler attributes (`onerror`, `onclick`, …), dangerous URI sc
 
 This is a second layer, not the only one — mermaid also runs at its default `securityLevel: 'strict'`.
 
+**Frontmatter `icon:` references are a small, deliberate exception to "no outbound calls for note content".** A note's `icon: md:<slug>` frontmatter value (see [Frontmatter](user-guide.md#frontmatter)) is resolved client-side to an SVG fetched from a public CDN (jsdelivr's `@mdi/svg`) — the only place mdnest makes a third-party network call driven by user-authored content. Two mitigations: the slug is validated against a strict allow-list (`^md:[a-z0-9]+(-[a-z0-9]+)*$`, `frontend/src/frontmatter.js`) before it's ever interpolated into a URL, so it can't smuggle a path-traversal, protocol, or alternate host; and the fetched SVG is passed through `sanitizeSvg` before being inlined, same as mermaid output. On an airgapped or outbound-restricted install the fetch simply fails and no icon is shown — there is no vendored fallback and no config flag to disable it.
+
 ---
 
 ## Operational security

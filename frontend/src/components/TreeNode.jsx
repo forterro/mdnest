@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import FrontmatterIcon from './FrontmatterIcon.jsx';
 
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
@@ -97,6 +98,9 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
   }, [isFolder, node, onDrop]);
 
   const name = node.name || node.path.split('/').filter(Boolean).pop() || node.path;
+  // Frontmatter title overrides only the tree label, never the tooltip/path
+  // reference below — the real filename stays authoritative everywhere else.
+  const displayName = node.frontmatter?.title || name;
 
   const hasChildren = isFolder && node.children && node.children.length > 0;
 
@@ -127,8 +131,18 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         ) : (
           <span className="tree-arrow-spacer" />
         )}
-        <span className={`tree-icon-svg ${isFolder ? (expanded ? 'folder-open' : (hasChildren ? 'folder-full' : 'folder-empty')) : 'file'}`} />
-        <span className={`tree-label${isFolder && !hasChildren ? ' empty-folder' : ''}`}>{name}</span>
+        {isFolder ? (
+          <span className={`tree-icon-svg ${expanded ? 'folder-open' : (hasChildren ? 'folder-full' : 'folder-empty')}`} />
+        ) : node.frontmatter?.icon ? (
+          <FrontmatterIcon
+            icon={node.frontmatter.icon}
+            className="tree-frontmatter-icon"
+            fallback={<span className="tree-icon-svg file" />}
+          />
+        ) : (
+          <span className="tree-icon-svg file" />
+        )}
+        <span className={`tree-label${isFolder && !hasChildren ? ' empty-folder' : ''}`}>{displayName}</span>
       </div>
       {isFolder && expanded && node.children && (
         <div className="tree-children">

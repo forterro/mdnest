@@ -737,13 +737,20 @@ Retrieve the full directory tree for a namespace.
     {
       "name": "todo.md",
       "type": "file",
-      "path": "todo.md"
+      "path": "todo.md",
+      "frontmatter": {
+        "title": "To-do list",
+        "icon": "md:cog",
+        "tags": ["personal"]
+      }
     }
   ]
 }
 ```
 
 Folders are sorted before files. Within each group, items are sorted alphabetically (case-insensitive). Hidden files and directories (names starting with `.`) are excluded.
+
+A file node carries an optional `frontmatter` object (omitted entirely when the note has no leading YAML frontmatter block, or isn't a `.md`/`.markdown` file) with any of `title`, `author`, `icon`, `type`, `tags` (see [Frontmatter](user-guide.md#frontmatter)). It is read-only and parsed server-side; the response is cached per namespace and invalidated on any write within it.
 
 **Example:**
 
@@ -785,6 +792,8 @@ Returns the raw file content with `Content-Type: text/markdown; charset=utf-8`.
 
 Some content here.
 ```
+
+If the note has a leading YAML frontmatter block, an `X-Frontmatter` response header carries it as base64-encoded JSON (same shape as the tree's `frontmatter` field). The frontmatter block itself is **not** stripped from the body — it stays part of the raw content, same as any other markdown.
 
 **Example:**
 

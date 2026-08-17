@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -138,5 +139,94 @@ func TestGetTreeHidesNotesWithoutAnyGrant(t *testing.T) {
 	}
 	if got := countLeaves(&root); got != 0 {
 		t.Fatalf("ungranted member should see no notes, got %d: %s", got, w.Body.String())
+	}
+}
+
+// notesDirWithFrontmatter builds one markdown file carrying a full
+// frontmatter block and one plain markdown file without.
+func notesDirWithFrontmatter(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	ns := filepath.Join(root, "alpha")
+	if err := os.MkdirAll(ns, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", ns, err)
+	}
+	withFm := "---\ntitle: My Note\nicon: md:cog\ntype: basic\ntags:\n  - infra\n---\n\n# Body\n"
+	if err := os.WriteFile(filepath.Join(ns, "with-frontmatter.md"), []byte(withFm), 0o644); err != nil {
+		t.Fatalf("write with-frontmatter.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ns, "plain.md"), []byte("# Just a note\n"), 0o644); err != nil {
+		t.Fatalf("write plain.md: %v", err)
+	}
+	return root
+}
+
+func findChild(node *TreeNode, name string) *TreeNode {
+	for _, c := range node.Children {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestBuildTreePopulatesFrontmatter(t *testing.T) {
+	root := notesDirWithFrontmatter(t)
+	stg := localStore(t, root)
+	h := NewTreeHandler(stg, nil, nil)
+	ctx := context.Background()
+
+	tree, err := h.buildTree(ctx, "alpha", "", "")
+	if err != nil {
+		t.Fatalf("buildTree: %v", err)
+	}
+
+	withFm := findChild(tree, "with-frontmatter.md")
+	if withFm == nil || withFm.Frontmatter == nil {
+		t.Fatalf("expected frontmatter on with-frontmatter.md, got %+v", withFm)
+	}
+	if withFm.Frontmatter.Title != "My Note" || withFm.Frontmatter.Icon != "md:cog" {
+		t.Errorf("unexpected frontmatter: %+v", withFm.Frontmatter)
+	}
+
+	plain := findChild(tree, "plain.md")
+	if plain == nil {
+		t.Fatalf("plain.md not found in tree")
+	}
+	if plain.Frontmatter != nil {
+		t.Errorf("expected nil frontmatter on plain.md, got %+v", plain.Frontmatter)
+	}
+}
+
+// The frontmatter cache must not serve stale data forever — InvalidateCache
+// (wired in main.go alongside the search cache) is what keeps it correct
+// after a note is edited.
+func TestBuildTreeFrontmatterCacheInvalidation(t *testing.T) {
+	root := notesDirWithFrontmatter(t)
+	stg := localStore(t, root)
+	h := NewTreeHandler(stg, nil, nil)
+	ctx := context.Background()
+
+	tree, err := h.buildTree(ctx, "alpha", "", "")
+	if err != nil {
+		t.Fatalf("buildTree: %v", err)
+	}
+	if got := findChild(tree, "with-frontmatter.md").Frontmatter.Title; got != "My Note" {
+		t.Fatalf("expected initial title 'My Note', got %q", got)
+	}
+
+	notePath := filepath.Join(root, "alpha", "with-frontmatter.md")
+	if err := os.WriteFile(notePath, []byte("---\ntitle: Renamed\n---\nbody"), 0o644); err != nil {
+		t.Fatalf("rewrite file: %v", err)
+	}
+	tree, _ = h.buildTree(ctx, "alpha", "", "")
+	if got := findChild(tree, "with-frontmatter.md").Frontmatter.Title; got != "My Note" {
+		t.Fatalf("expected stale cached title 'My Note' before invalidation, got %q", got)
+	}
+
+	h.InvalidateCache("alpha")
+	tree, _ = h.buildTree(ctx, "alpha", "", "")
+	if got := findChild(tree, "with-frontmatter.md").Frontmatter.Title; got != "Renamed" {
+		t.Fatalf("expected fresh title 'Renamed' after invalidation, got %q", got)
 	}
 }

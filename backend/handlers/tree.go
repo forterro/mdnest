@@ -7,6 +7,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
@@ -17,17 +18,56 @@ type TreeHandler struct {
 	store      storage.Storage
 	grantStore store.GrantStore // nil in single mode
 	groupStore store.GroupStore // nil in single mode or when groups are disabled
+	fmCaches   sync.Map         // namespace -> *frontmatterNsCache
 }
 
 type TreeNode struct {
-	Name     string      `json:"name"`
-	Type     string      `json:"type"`
-	Path     string      `json:"path,omitempty"`
-	Children []*TreeNode `json:"children,omitempty"`
+	Name        string       `json:"name"`
+	Type        string       `json:"type"`
+	Path        string       `json:"path,omitempty"`
+	Children    []*TreeNode  `json:"children,omitempty"`
+	Frontmatter *Frontmatter `json:"frontmatter,omitempty"`
+}
+
+// frontmatterNsCache caches parsed frontmatter per relative path within a
+// namespace, so repeated tree listings (the sidebar polls periodically) don't
+// re-read and re-parse every markdown file's content each time. A nil map
+// entry means "parsed, no frontmatter present" (still worth caching).
+type frontmatterNsCache struct {
+	mu   sync.Mutex
+	data map[string]*Frontmatter
 }
 
 func NewTreeHandler(store storage.Storage, grantStore store.GrantStore, groupStore store.GroupStore) *TreeHandler {
 	return &TreeHandler{store: store, grantStore: grantStore, groupStore: groupStore}
+}
+
+// InvalidateCache drops the cached frontmatter for a namespace. Called
+// alongside the search cache invalidation on every mutating request so a
+// note's frontmatter never appears stale in the tree after an edit.
+func (h *TreeHandler) InvalidateCache(ns string) {
+	h.fmCaches.Delete(ns)
+}
+
+// getFrontmatter returns the cached (or freshly parsed) frontmatter for a
+// markdown file. defaultAuthor fills in an absent `author:` field.
+func (h *TreeHandler) getFrontmatter(ctx context.Context, ns, relPath, defaultAuthor string) *Frontmatter {
+	val, _ := h.fmCaches.LoadOrStore(ns, &frontmatterNsCache{data: make(map[string]*Frontmatter)})
+	cache := val.(*frontmatterNsCache)
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	if fm, ok := cache.data[relPath]; ok {
+		return fm
+	}
+
+	var fm *Frontmatter
+	if data, err := h.store.ReadFile(ctx, ns, relPath); err == nil {
+		fm = ExtractFrontmatter(string(data), defaultAuthor)
+	}
+	cache.data[relPath] = fm
+	return fm
 }
 
 // GetTree handles GET /api/tree?ns=...
@@ -43,7 +83,12 @@ func (h *TreeHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	root, err := buildTree(ctx, h.store, ns, "")
+	defaultAuthor := ""
+	if uc := middleware.UserFromContext(ctx); uc != nil {
+		defaultAuthor = uc.Username
+	}
+
+	root, err := h.buildTree(ctx, ns, "", defaultAuthor)
 	if err != nil {
 		http.Error(w, `{"error":"failed to read directory tree"}`, http.StatusInternalServerError)
 		return
@@ -174,7 +219,15 @@ func isTextFileExt(ext string) bool {
 	return textExtensions[ext]
 }
 
-func buildTree(ctx context.Context, stg storage.Storage, ns, relPath string) (*TreeNode, error) {
+// markdownExtensions are the file extensions frontmatter parsing applies to.
+// Other text extensions (txt/json/sql/csv/yaml) are shown in the tree but are
+// not notes, so they never carry an mdnest frontmatter block.
+var markdownExtensions = map[string]bool{
+	".md": true, ".markdown": true,
+}
+
+func (h *TreeHandler) buildTree(ctx context.Context, ns, relPath, defaultAuthor string) (*TreeNode, error) {
+	stg := h.store
 	entries, err := stg.ReadDir(ctx, ns, relPath)
 	if err != nil {
 		return nil, err
@@ -210,7 +263,7 @@ func buildTree(ctx context.Context, stg storage.Storage, ns, relPath string) (*T
 		}
 
 		if entry.IsDir {
-			child, err := buildTree(ctx, stg, ns, childRelPath)
+			child, err := h.buildTree(ctx, ns, childRelPath, defaultAuthor)
 			if err != nil {
 				continue
 			}
@@ -225,10 +278,15 @@ func buildTree(ctx context.Context, stg storage.Storage, ns, relPath string) (*T
 			if entry.Size > 5*1024*1024 {
 				continue
 			}
+			var fm *Frontmatter
+			if markdownExtensions[ext] {
+				fm = h.getFrontmatter(ctx, ns, childRelPath, defaultAuthor)
+			}
 			node.Children = append(node.Children, &TreeNode{
-				Name: name,
-				Type: "file",
-				Path: childRelPath,
+				Name:        name,
+				Type:        "file",
+				Path:        childRelPath,
+				Frontmatter: fm,
 			})
 		}
 	}

@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
+import FrontmatterIcon from './FrontmatterIcon.jsx';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive, marpLocked }) {
+function Toolbar({ currentPath, frontmatter, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive, marpLocked }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -51,6 +52,9 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           stays visible even when the toolbar is cramped. Full path is
           on the title="" attribute for desktop hover reveal. */}
       <span className="toolbar-path" title={currentPath || ''}>
+        {currentPath && frontmatter?.icon && (
+          <FrontmatterIcon icon={frontmatter.icon} className="toolbar-frontmatter-icon" />
+        )}
         {!currentPath && 'No file selected'}
         {currentPath && (() => {
           const idx = currentPath.lastIndexOf('/');
@@ -63,6 +67,13 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
             </>
           );
         })()}
+        {currentPath && frontmatter?.tags?.length > 0 && (
+          <span className="toolbar-tags">
+            {frontmatter.tags.map((tag) => (
+              <span key={tag} className="attribution-chip toolbar-tag-chip">{tag}</span>
+            ))}
+          </span>
+        )}
         {currentPath && onRevealInTree && (
           <button
             className="toolbar-inline-reveal"

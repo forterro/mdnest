@@ -547,6 +547,7 @@ func main() {
 			}
 			if ns := r.URL.Query().Get("ns"); ns != "" {
 				searchHandler.InvalidateCache(ns)
+				treeHandler.InvalidateCache(ns)
 				if collabHub != nil {
 					collabHub.BroadcastTreeChanged(ns)
 				}

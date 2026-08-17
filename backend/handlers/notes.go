@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -177,10 +178,21 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defaultAuthor := ""
+	if uc := middleware.UserFromContext(ctx); uc != nil {
+		defaultAuthor = uc.Username
+	}
+	fm := ExtractFrontmatter(cleanContent, defaultAuthor)
+
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("ETag", etag)
 	if noteID != "" {
 		w.Header().Set("X-Note-ID", noteID)
+	}
+	if fm != nil {
+		if fmJSON, err := json.Marshal(fm); err == nil {
+			w.Header().Set("X-Frontmatter", base64.StdEncoding.EncodeToString(fmJSON))
+		}
 	}
 	w.Write([]byte(cleanContent))
 }

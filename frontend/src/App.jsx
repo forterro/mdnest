@@ -36,6 +36,7 @@ import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
 import { isExcalidrawDoc } from './excalidraw.js';
+import { splitFrontmatterBlock } from './frontmatter.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
 import {
   getToken,
@@ -166,6 +167,10 @@ function App() {
   // entry. Pre-v3.6.1 this defaulted to '' and pressing Cmd+Z could walk
   // the undo stack into that empty state, wiping real content.
   const [content, setContent] = useState(null);
+  // Parsed server-side (backend/handlers/frontmatter.go) and delivered via
+  // the X-Frontmatter header on getNote() — see frontend/src/api.js. Read-only
+  // display metadata; null when the open note has no frontmatter block.
+  const [frontmatter, setFrontmatter] = useState(null);
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [commentWidth, setCommentWidth] = useState(() => {
     const v = parseInt(localStorage.getItem('mdnest_comment_width'), 10);
@@ -290,15 +295,30 @@ function App() {
   // ENABLE_MARP on the backend. When on, a note whose frontmatter says
   // `marp: true` is shown as a slide deck in the Live view instead of the editor.
   const marpEnabled = !!appConfig?.marp;
-  const marpActive = marpEnabled && isMarpDoc(content);
+  // `type: marp` frontmatter is an alternate trigger alongside `marp: true`.
+  const marpActive = marpEnabled && (isMarpDoc(content) || frontmatter?.type === 'marp');
   // Marp decks must never go through the Live/WYSIWYG editor — it reformats the
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
   // editing for them, regardless of the user's editor-mode preference.
   const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
   // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
-  // bypassing the text editor/preview entirely.
+  // bypassing the text editor/preview entirely. `type: excalidraw` frontmatter is
+  // an alternate trigger, letting a drawing live at any path (not just
+  // `*.excalidraw.md`); the editor falls back gracefully if the content isn't
+  // actually a parseable scene (see ExcalidrawEditor/parseExcalidraw).
   const excalidrawEnabled = !!appConfig?.excalidraw;
-  const excalidrawActive = excalidrawEnabled && isExcalidrawDoc(currentPath);
+  const excalidrawActive = excalidrawEnabled && (isExcalidrawDoc(currentPath) || frontmatter?.type === 'excalidraw');
+  // The Live editor round-trips markdown through Milkdown's document model,
+  // which mangles a leading `---` frontmatter block (thematic-break/setext
+  // reformatting — the same corruption Marp's frontmatter was already known
+  // to suffer there). Keep the block out of Milkdown's document entirely:
+  // only the body goes in, and the untouched block is re-prepended on every
+  // change (see the <LiveEditor> content/onChange below). No-op when the note
+  // has no frontmatter block (frontmatterBlock === '').
+  const { block: frontmatterBlock, body: liveEditorContent } = useMemo(
+    () => splitFrontmatterBlock(typeof content === 'string' ? content : ''),
+    [content]
+  );
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -400,8 +420,9 @@ function App() {
   // server — same as the static <title> in index.html.
   useEffect(() => {
     const alias = appConfig?.serverAlias;
-    document.title = alias ? `mdnest (${alias})` : 'mdnest';
-  }, [appConfig?.serverAlias]);
+    const base = alias ? `mdnest (${alias})` : 'mdnest';
+    document.title = frontmatter?.title ? `${frontmatter.title} \u2014 ${base}` : base;
+  }, [appConfig?.serverAlias, frontmatter?.title]);
 
   // Version check: poll /api/config every 60s, compare server version vs build version.
   // Same poll keeps `appConfig.latestRelease` fresh — without this update,
@@ -453,10 +474,11 @@ function App() {
       const ns = selectedNsRef.current;
       const path = currentPathRef.current;
       if (ns && path) {
-        getNote(ns, path).then(({ text, etag }) => {
+        getNote(ns, path).then(({ text, etag, frontmatter: fm }) => {
           if (selectedNsRef.current === ns && currentPathRef.current === path) {
             setContent(text);
             setSavedContent(text);
+            setFrontmatter(fm);
             etagRef.current = etag;
             // Remount the drawing canvas so it shows the remote scene, not the
             // stale one it was mounted with.
@@ -662,9 +684,10 @@ function App() {
 
     refreshTree(selectedNs).then(() => {
       if (currentPath) {
-        getNote(selectedNs, currentPath).then(({ text, etag }) => {
+        getNote(selectedNs, currentPath).then(({ text, etag, frontmatter: fm }) => {
           setContent(text);
           setSavedContent(text);
+          setFrontmatter(fm);
           etagRef.current = etag;
           // Scroll-restore the file the user had last open in this
           // namespace. The per-file prefs (mdnest_file_prefs:<ns>/<path>)
@@ -677,6 +700,7 @@ function App() {
           // it again.
           setCurrentPath(null);
           setContent(null);
+          setFrontmatter(null);
           setSavedContent('');
           setHash(selectedNs, null);
           setLastPath(selectedNs, null);
@@ -701,7 +725,7 @@ function App() {
 
     const interval = setInterval(async () => {
       try {
-        const { text: remote, etag } = await getNote(selectedNs, currentPath);
+        const { text: remote, etag, frontmatter: fm } = await getNote(selectedNs, currentPath);
 
         // STALE CHECK: if user switched files while getNote was in flight, discard
         if (pollPathRef.current !== myPollKey) return;
@@ -712,6 +736,7 @@ function App() {
           // No local unsaved changes — silently update
           setContent(remote);
           setSavedContent(remote);
+          setFrontmatter(fm);
           etagRef.current = etag;
         } else {
           // User has unsaved changes AND file changed externally — show conflict
@@ -889,10 +914,11 @@ function App() {
     // board's own "open source note" action closes it explicitly.
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
-      const { text, etag } = await getNote(ns, path);
+      const { text, etag, frontmatter: fm } = await getNote(ns, path);
       setCurrentPath(path);
       setContent(text);
       setSavedContent(text);
+      setFrontmatter(fm);
       etagRef.current = etag;
       restoreScrollPosition(ns, path);
       if (commentsEnabled) {
@@ -919,11 +945,13 @@ function App() {
       // Wipe stale content so the editor doesn't briefly show the
       // previous namespace's note before the new content arrives.
       setContent(null);
+      setFrontmatter(null);
       setSavedContent('');
       setHash(ns, last);
     } else {
       setCurrentPath(null);
       setContent(null);
+      setFrontmatter(null);
       setSavedContent('');
       setHash(ns, null);
     }
@@ -938,10 +966,11 @@ function App() {
     // Clear any pending save timer from the previous file
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
-      const { text, etag } = await getNote(selectedNs, path);
+      const { text, etag, frontmatter: fm } = await getNote(selectedNs, path);
       setCurrentPath(path);
       setContent(text);
       setSavedContent(text);
+      setFrontmatter(fm);
       etagRef.current = etag;
       setConflictBanner(null);
       setSidebarVisible(false);
@@ -1142,7 +1171,7 @@ function App() {
         if (!confirm(`Delete "${target.name || target.path}"?`)) return;
         try {
           await deleteNote(selectedNs, target.path);
-          if (currentPath === target.path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
+          if (currentPath === target.path) { setCurrentPath(null); setContent(null); setFrontmatter(null); setSavedContent(''); }
           // Forget this as the namespace's last-opened file so a future
           // ns switch doesn't try to reopen a now-deleted note.
           const lastForNs = getLastPath(selectedNs);
@@ -1180,7 +1209,7 @@ function App() {
         if (!confirm(`Delete folder "${target.name || target.path}" and all its contents?`)) return;
         try {
           await deleteNote(selectedNs, target.path);
-          if (currentPath && currentPath.startsWith(target.path)) { setCurrentPath(null); setContent(null); setSavedContent(''); }
+          if (currentPath && currentPath.startsWith(target.path)) { setCurrentPath(null); setContent(null); setFrontmatter(null); setSavedContent(''); }
           // If the last-opened file lived inside this folder it's gone now.
           const lastForNs = getLastPath(selectedNs);
           if (lastForNs && lastForNs.startsWith(target.path)) setLastPath(selectedNs, null);
@@ -1371,9 +1400,10 @@ function App() {
     await refreshTree(selectedNs, { broadcast: true });
     if (currentPath) {
       try {
-        const { text, etag } = await getNote(selectedNs, currentPath);
+        const { text, etag, frontmatter: fm } = await getNote(selectedNs, currentPath);
         setContent(text);
         setSavedContent(text);
+        setFrontmatter(fm);
         etagRef.current = etag;
         setConflictBanner(null);
       } catch (e) {
@@ -1386,9 +1416,10 @@ function App() {
   const handleReloadNote = useCallback(async () => {
     if (!selectedNs || !currentPath) return;
     try {
-      const { text, etag } = await getNote(selectedNs, currentPath);
+      const { text, etag, frontmatter: fm } = await getNote(selectedNs, currentPath);
       setContent(text);
       setSavedContent(text);
+      setFrontmatter(fm);
       etagRef.current = etag;
       setDrawingReloadKey((k) => k + 1);
       setConflictBanner(null);
@@ -1504,6 +1535,7 @@ function App() {
       >
         <Toolbar
           currentPath={currentPath}
+          frontmatter={frontmatter}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
           onRevealInTree={revealInTree}
           onChangePassword={() => setShowChangePassword(true)}
@@ -1665,8 +1697,8 @@ function App() {
                             mount once content is a real string). */}
                         <LiveEditor
                             key={`${selectedNs}/${currentPath}`}
-                            content={content}
-                            onChange={canWriteCurrent ? handleContentChange : null}
+                            content={liveEditorContent}
+                            onChange={canWriteCurrent ? (body) => handleContentChange(frontmatterBlock + body) : null}
                             readOnly={!canWriteCurrent}
                             ns={selectedNs}
                             currentPath={currentPath}
