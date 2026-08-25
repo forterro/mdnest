@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
@@ -314,8 +316,16 @@ func gitSSHEnv(ns string) []string {
 	return []string{"HOME=/root"}
 }
 
+// gitOpTimeout bounds every git subprocess run through gitRunIn/gitCmd. Pull
+// and push here have no other deadline (this handler passes no context at
+// all), so a stalled remote would otherwise hang the request goroutine — and
+// its OS thread — forever, leaking one thread per stuck sync attempt.
+const gitOpTimeout = 2 * time.Minute
+
 func gitRunIn(dir string, extraEnv []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "HOME=/root")
 	for _, e := range extraEnv {
@@ -326,7 +336,9 @@ func gitRunIn(dir string, extraEnv []string, args ...string) (string, error) {
 }
 
 func gitCmd(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
