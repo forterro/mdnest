@@ -259,6 +259,15 @@ const (
 	pushBackoffMax  = 15 * time.Minute
 )
 
+// gitNetworkTimeout bounds every git subprocess that talks to a remote (fetch,
+// push). The committer's ctx is context.Background() with no deadline of its
+// own, so without this a stalled remote (TCP black hole, slow TLS handshake,
+// credential prompt) hangs the exec.CommandContext call — and the OS thread
+// blocked in it — forever. That thread is never returned to the runtime's pool,
+// so a writer process that hits this repeatedly (once per stall) leaks threads
+// monotonically until the pod exhausts its PID limit.
+const gitNetworkTimeout = 2 * time.Minute
+
 // errPushPending keeps a namespace queued for a later push without pushing (and
 // logging) now, while it is inside its backoff window.
 var errPushPending = errors.New("storage: push backing off")
@@ -708,7 +717,10 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 	// without it a value beginning with "-" is parsed by git as an option
 	// (e.g. --upload-pack=<cmd>, which executes <cmd>). The values are also
 	// rejected at the API boundary; this is the second layer.
-	if err := c.gitEnv(ctx, dir, plan.env, "fetch", "--no-tags", "--quiet", "--end-of-options", plan.url, plan.branch); err != nil {
+	fetchCtx, cancel := context.WithTimeout(ctx, gitNetworkTimeout)
+	err = c.gitEnv(fetchCtx, dir, plan.env, "fetch", "--no-tags", "--quiet", "--end-of-options", plan.url, plan.branch)
+	cancel()
+	if err != nil {
 		if oldHEAD == "" {
 			// Empty local repo: if the remote does not exist yet there is nothing
 			// to seed or push — the repo is created on the first push once the
@@ -739,7 +751,10 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 	if newHEAD == "" {
 		return nil // empty namespace: nothing to push or reflect
 	}
-	if err := c.gitEnv(ctx, dir, plan.env, "push", "--quiet", "--end-of-options", plan.url, "HEAD:refs/heads/"+plan.branch); err != nil {
+	pushCtx, cancel := context.WithTimeout(ctx, gitNetworkTimeout)
+	err = c.gitEnv(pushCtx, dir, plan.env, "push", "--quiet", "--end-of-options", plan.url, "HEAD:refs/heads/"+plan.branch)
+	cancel()
+	if err != nil {
 		return fmt.Errorf("git push %s: %w", ns, err)
 	}
 	if newHEAD != oldHEAD {
