@@ -44,7 +44,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # Stage 2: Run
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates git openssh-client
+# tini becomes PID 1 (see ENTRYPOINT below) so orphaned grandchildren of a git
+# subprocess (ssh, askpass, git-remote-https/http helpers that can outlive a
+# killed or already-exited git parent) get reaped the instant they exit,
+# instead of sitting as zombies until reapZombies' periodic sweep in main.go
+# gets to them. The two are complementary: tini catches reparented orphans
+# immediately; reapZombies is the backstop for anything tini's scope doesn't
+# cover (e.g. a direct child of this process that never gets Wait()-ed).
+RUN apk add --no-cache ca-certificates git openssh-client tini
 
 WORKDIR /app
 
@@ -52,4 +59,5 @@ COPY --from=builder /app/mdnest .
 
 EXPOSE 8080
 
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["./mdnest"]

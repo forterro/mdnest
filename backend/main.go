@@ -63,6 +63,76 @@ func envInt(key string, fallback int) int {
 	return n
 }
 
+// reapZombies periodically sweeps for zombie children that were never
+// collected. This binary runs as the container's PID 1 (no init system like
+// tini/dumb-init in front of it), so unlike an ordinary process it is on the
+// hook for reaping every child in its PID namespace, not just the ones its
+// own os/exec calls spawn and Wait() for. Left unaddressed this leaks one
+// zombie per uncollected child forever, eventually exhausting the pod's PID
+// limit — the actual mechanism behind the mdnest-writer thread/PID growth
+// (git subprocesses, spawned throughout backend/storage and
+// backend/handlers, are the overwhelming majority of this process's children).
+//
+// Only reaping zombies that are still around on the NEXT sweep (rather than
+// greedily wait4(-1, ...)-ing on every SIGCHLD) avoids racing a concurrently
+// in-flight exec.Cmd.Wait() for a different, still-legitimately-running
+// child: anything Go's os/exec is actively waiting on reaps in milliseconds
+// once it exits, long before the next sweep — a zombie that survives to the
+// next tick was never going to be collected by anything else.
+func reapZombies(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	self := os.Getpid()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reapStaleZombies(self)
+		}
+	}
+}
+
+// reapStaleZombies scans /proc for zombie processes parented to pid (this
+// program) and reaps each with a targeted, non-blocking wait4 on that exact
+// PID — deliberately never wait4(-1, ...), so a live child being awaited by
+// some other, unrelated exec.Cmd.Wait() call is never disturbed.
+func reapStaleZombies(pid int) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		childPid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", childPid))
+		if err != nil {
+			continue
+		}
+		// Format: "pid (comm) state ppid ..." — comm can contain spaces/parens,
+		// so scan from the last ')' rather than splitting naively on spaces.
+		s := string(data)
+		i := strings.LastIndexByte(s, ')')
+		if i < 0 || i+2 >= len(s) {
+			continue
+		}
+		fields := strings.Fields(s[i+2:])
+		if len(fields) < 2 || fields[0] != "Z" {
+			continue // not a zombie
+		}
+		if ppid, err := strconv.Atoi(fields[1]); err != nil || ppid != pid {
+			continue // not ours to reap
+		}
+		var ws syscall.WaitStatus
+		_, _ = syscall.Wait4(childPid, &ws, syscall.WNOHANG, nil)
+	}
+}
+
 func main() {
 	// Support -migrate flag for running migrations only (then exit)
 	migrateOnly := len(os.Args) > 1 && os.Args[1] == "-migrate"
@@ -122,6 +192,7 @@ func main() {
 	// gracefully rather than being killed mid-request.
 	appCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	go reapZombies(appCtx, 30*time.Second)
 
 	// The per-workspace git remote resolver is DB-backed and only available
 	// once multi-mode Postgres is connected (below), so it is wired lazily here
