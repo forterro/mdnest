@@ -141,3 +141,10 @@ export function gitBackupFor(ns, workspaces = [], connections = []) {
   if (def) return { kind: 'default', connection: def, repo: `${base(def)}/${ns}.git` };
   return { kind: 'none' };
 }
+
+// The Git backup of a person's personal namespace (set up by them in Settings),
+// for their card in the People tab, or null. Only the personal row counts: a
+// team namespace never has an owner, but match is_personal so it never could.
+export function personalBackupOf(userId, workspaces = []) {
+  return workspaces.find((w) => w.is_personal && w.owner_id === userId) || null;
+}

@@ -860,6 +860,38 @@ export async function getWorkspaceStatus() {
   }
 }
 
+// --- Git backup of your personal namespace (Settings → Personal namespace) ---
+// The server API keeps its name: /me/workspace is the caller's personal
+// namespace and its git config. The token is never returned (has_credential).
+
+export async function getMyGitBackup() {
+  const res = await request('/me/workspace');
+  if (!res.ok) throw new Error('Could not load your personal namespace');
+  return res.json();
+}
+
+export async function saveMyGitBackup(payload) {
+  const res = await request('/me/workspace', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Could not save the Git backup');
+  }
+  return res.json();
+}
+
+export async function turnOffMyGitBackup() {
+  const res = await request('/me/workspace', { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Could not turn off the Git backup');
+  }
+  return res.json();
+}
+
 // --- Comments ---
 
 export async function listComments(ns, path) {

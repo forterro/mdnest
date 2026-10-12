@@ -20,10 +20,11 @@ import {
   adminCreateGroupGrant,
   adminUpdateGroupGrant,
   adminDeleteGroupGrant,
+  adminDeleteWorkspace,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
-import { GitBackup, AddNamespace, GitConnections } from './AdminGit.jsx';
-import { buildDirectory, name, pathLabel, viaLabel, accessSummary, matchesPerson } from '../adminDirectory.js';
+import { GitBackup, AddNamespace, GitConnections, SyncState } from './AdminGit.jsx';
+import { buildDirectory, name, pathLabel, viaLabel, accessSummary, matchesPerson, personalBackupOf } from '../adminDirectory.js';
 
 // People and Namespaces: the two ways an admin looks at access. Both read the
 // same directory (users, their grants, groups, namespace admins), so a change
@@ -109,7 +110,7 @@ function PickToAdd({ placeholder, options, onPick, testId }) {
 
 // ---------------------------------------------------------------- People
 
-export function PeopleTab({ isSuperAdmin, namespaces, isFederated, userProvider, grantMaxDepth, directory }) {
+export function PeopleTab({ isSuperAdmin, namespaces, isFederated, userProvider, grantMaxDepth, directory, git }) {
   const { dir, error: loadError, reload } = directory;
   const { error, setError, run } = useAction(reload);
   const [open, setOpen] = useState(null);
@@ -149,7 +150,7 @@ export function PeopleTab({ isSuperAdmin, namespaces, isFederated, userProvider,
       {resetTarget && (
         <ResetPasswordModal user={resetTarget} onClose={() => setResetTarget(null)} onDone={() => setResetTarget(null)} />
       )}
-      {(error || loadError) && <div className="admin-error">{error || loadError}</div>}
+      {(error || loadError || git?.error) && <div className="admin-error">{error || loadError || git.error}</div>}
 
       <div className="grants-user-list">
         {people.map((p) => (
@@ -164,6 +165,7 @@ export function PeopleTab({ isSuperAdmin, namespaces, isFederated, userProvider,
             grantMaxDepth={grantMaxDepth}
             canReset={isSuperAdmin && userProvider === 'local' && p.user.role !== 'superadmin'}
             run={run}
+            git={git}
             onReset={() => setResetTarget(p.user)}
             onDeleted={() => setOpen(null)}
           />
@@ -174,10 +176,18 @@ export function PeopleTab({ isSuperAdmin, namespaces, isFederated, userProvider,
   );
 }
 
-function PersonCard({ person, open, onToggle, isSuperAdmin, namespaces, groups, grantMaxDepth, canReset, run, onReset, onDeleted }) {
+function PersonCard({ person, open, onToggle, isSuperAdmin, namespaces, groups, grantMaxDepth, canReset, run, git, onReset, onDeleted }) {
   const u = person.user;
   const isSuper = u.role === 'superadmin';
   const summary = accessSummary(person);
+  // A superadmin can turn off the Git backup someone set up for their personal
+  // namespace, for when they have left. Only turning it off: where it pushes
+  // is the owner's choice.
+  const personal = isSuperAdmin && git?.mirroring ? personalBackupOf(u.id, git.workspaces) : null;
+  const turnOffBackup = () => {
+    if (!confirm(`Turn off the Git backup of ${name(u)}'s personal namespace? The token they saved is deleted. Their notes stay in mdnest, and what was already pushed stays in the repository.`)) return;
+    git.run(() => adminDeleteWorkspace(personal.id));
+  };
 
   const setSuper = (on) => {
     const role = on ? 'superadmin' : (person.adminOf.length ? 'admin' : 'collaborator');
@@ -297,6 +307,22 @@ function PersonCard({ person, open, onToggle, isSuperAdmin, namespaces, groups, 
               </table>
             )}
           </section>
+
+          {personal && (
+            <section className="adm-sec" data-testid="adm-personal-backup">
+              <h4>Personal namespace</h4>
+              <div className="adm-git-line">
+                <span className="grants-item-ns">{personal.namespace}</span>
+                <span className="adm-via">Git backup</span>
+                <code className="adm-git-repo" title={personal.remote_url}>{personal.remote_url}</code>
+                <SyncState ws={personal} />
+                <span className="adm-git-actions">
+                  <button className="admin-action-btn danger" onClick={turnOffBackup}>Turn off backup</button>
+                </span>
+              </div>
+              <p className="admin-hint adm-note">Set up by {name(u)} in Settings. Turn it off when they have left.</p>
+            </section>
+          )}
 
           {isSuperAdmin && (
             <div className="adm-person-actions">

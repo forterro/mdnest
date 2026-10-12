@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { changePassword, listTokens, createToken, revokeToken, restartServer, readBootId, waitForRestart } from '../api.js';
+import { changePassword, listTokens, createToken, revokeToken, restartServer, readBootId, waitForRestart, getWorkspaceStatus, getMyGitBackup, saveMyGitBackup, turnOffMyGitBackup } from '../api.js';
+import { SyncState, RepoFields, repoPayload } from './AdminGit.jsx';
 
 // Derive server URL from current browser location
 function getServerUrl() {
@@ -58,6 +59,16 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
   // users table. Keeping the tab visible would be misleading and the
   // change-password endpoint refuses these accounts anyway.
   const passwordEnabled = userProvider !== 'firebase' && userProvider !== 'sso';
+  // A Git backup of your personal namespace works only where the server keeps
+  // namespaces in git; on the plain-files backend (and in single mode) nothing
+  // would read it, so the tab is not shown.
+  const [gitStatus, setGitStatus] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    getWorkspaceStatus().then((s) => { if (alive) setGitStatus(s); });
+    return () => { alive = false; };
+  }, []);
+  const personalTab = !!gitStatus?.mirroring;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -74,6 +85,9 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
           <button className={tab === 'api' ? 'active' : ''} onClick={() => setTab('api')}>API</button>
           {passwordEnabled && (
             <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
+          )}
+          {personalTab && (
+            <button className={tab === 'personal' ? 'active' : ''} onClick={() => setTab('personal')}>Personal namespace</button>
           )}
           {canRestart && (
             <button className={tab === 'server' ? 'active' : ''} onClick={() => setTab('server')}>Server</button>
@@ -92,6 +106,7 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
         {tab === 'mcp' && <McpTab />}
         {tab === 'api' && <ApiTab />}
         {tab === 'password' && passwordEnabled && <PasswordTab />}
+        {tab === 'personal' && personalTab && <PersonalNamespaceTab canSetUp={!!gitStatus?.encryption} />}
         {tab === 'server' && canRestart && <ServerTab />}
       </div>
     </div>
@@ -542,6 +557,99 @@ function PasswordTab() {
 }
 
 export default Settings;
+
+// PersonalNamespaceTab: the Git backup of your personal namespace, the
+// namespace of your own that is named after your email. You choose the
+// repository and its token. The token is never shown again (the server only
+// reports has_credential), so its field stays blank and blank keeps it.
+// Same words as the Git backup section of Admin → Namespaces.
+function PersonalNamespaceTab({ canSetUp }) {
+  const [backup, setBackup] = useState(null);
+  const [form, setForm] = useState(null); // open while setting up or editing
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setBackup(await getMyGitBackup()); } catch (e) { setError(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (fn) => {
+    setError(''); setBusy(true);
+    try { await fn(); await load(); return true; }
+    catch (e) { setError(e.message || 'That did not work'); return false; }
+    finally { setBusy(false); }
+  };
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const fields = (b) => ({ transport: b.transport || 'https', remote_url: b.remote_url || '', username: b.username || 'oauth2', branch: b.branch || 'main', known_hosts: b.known_hosts || '', credential: '' });
+
+  if (!backup) {
+    return (
+      <div className="settings-content">
+        {error ? <div className="admin-error">{error}</div> : <p className="admin-hint">Loading...</p>}
+      </div>
+    );
+  }
+
+  const configured = !!backup.id;
+  const save = async () => { if (await act(() => saveMyGitBackup(repoPayload(form)))) setForm(null); };
+  const toggle = () => act(() => saveMyGitBackup({ ...repoPayload(fields(backup)), git_enabled: !backup.git_enabled }));
+  const turnOff = () => {
+    if (!confirm('Turn off the Git backup? The token you saved is deleted. Your notes stay in mdnest, and what was already pushed stays in the repository.')) return;
+    act(() => turnOffMyGitBackup());
+  };
+  const syncError = backup.git_enabled && backup.last_sync_error && !backup.last_sync_error.startsWith('pending:') ? backup.last_sync_error : '';
+
+  return (
+    <div className="settings-content" data-testid="personal-namespace">
+      <p className="settings-description">
+        Your personal namespace is <code>{backup.namespace}</code>, a namespace of your own named after your email.
+      </p>
+      <section className="adm-sec" data-testid="personal-git-backup">
+        <h4>Git backup</h4>
+        <p className="admin-hint adm-note">
+          Every change is pushed to a git repository you own, so your notes are also kept outside mdnest.
+          Use a token or deploy key that can only write to that repository: mdnest keeps it encrypted and never shows it again.
+        </p>
+        {error && <div className="admin-error">{error}</div>}
+        {!configured && !form && (canSetUp ? (
+          <div className="adm-git-line">
+            <span className="admin-hint">Not backed up to git.</span>
+            <button className="admin-action-btn" onClick={() => setForm(fields(backup))}>Set up backup</button>
+          </div>
+        ) : (
+          <span className="admin-hint">Not available on this server yet: an administrator must set MDNEST_ENCRYPTION_KEY first.</span>
+        ))}
+        {configured && !form && (
+          <div className="adm-git-line">
+            <code className="adm-git-repo" title={backup.remote_url}>{backup.remote_url}</code>
+            <SyncState ws={backup} />
+            <span className="adm-git-actions">
+              <button className="admin-action-btn" onClick={() => setForm(fields(backup))} disabled={busy}>Edit</button>
+              <button className="admin-action-btn" onClick={toggle} disabled={busy}>{backup.git_enabled ? 'Pause' : 'Resume'}</button>
+              <button className="admin-action-btn danger" onClick={turnOff} disabled={busy}>Turn off</button>
+            </span>
+          </div>
+        )}
+        {configured && !form && syncError && (
+          <div className="admin-error" data-testid="personal-git-error">
+            Last sync failed: {syncError}
+            {backup.last_sync_at && ` (${new Date(backup.last_sync_at).toLocaleString()})`}
+          </div>
+        )}
+        {form && (
+          <div className="adm-git-form">
+            <RepoFields form={form} set={set} keepToken={backup.has_credential} />
+            <div className="adm-git-row end">
+              <button className="modal-btn" onClick={() => setForm(null)}>Cancel</button>
+              <button className="modal-btn-primary" onClick={save} disabled={busy || !form.remote_url.trim()}>Save</button>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
 
 // ServerTab restarts the backend (superadmin only; the server enforces it).
 // It is for a server that is stuck, without needing SSH. It cannot apply a

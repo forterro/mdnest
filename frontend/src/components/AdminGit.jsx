@@ -58,8 +58,8 @@ export function useGit(isSuperAdmin) {
 
 // The honest sync state of a namespace's backup. "ok" only after a sync that
 // succeeded; never synced, or the remote repository not created yet, is
-// "waiting", not an error.
-function SyncState({ ws }) {
+// waiting", not an error. Also used by Settings → Personal namespace.
+export function SyncState({ ws }) {
   if (!ws.git_enabled) return <span className="adm-git-state off">Off</span>;
   const err = ws.last_sync_error;
   if (err && err.startsWith('pending:')) return <span className="adm-git-state" title={err}>Waiting for first sync</span>;
@@ -77,9 +77,9 @@ function removeConfirmText(ns, ws) {
     : `${base} It has no synced git copy, so its notes are NOT deleted and the folder stays on the server.`;
 }
 
-const emptyRepo = { transport: 'https', remote_url: '', username: 'oauth2', branch: 'main', known_hosts: '', credential: '' };
+export const emptyRepo = { transport: 'https', remote_url: '', username: 'oauth2', branch: 'main', known_hosts: '', credential: '' };
 
-function RepoFields({ form, set, keepToken }) {
+export function RepoFields({ form, set, keepToken }) {
   return (
     <div className="adm-git-fields">
       <div className="adm-git-row">
@@ -105,7 +105,7 @@ function RepoFields({ form, set, keepToken }) {
   );
 }
 
-const repoPayload = (form) => {
+export const repoPayload = (form) => {
   const p = {
     git_enabled: true,
     transport: form.transport,

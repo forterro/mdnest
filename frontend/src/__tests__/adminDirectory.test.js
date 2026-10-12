@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildDirectory, viaLabel, accessSummary, matchesPerson, strongerPermission, gitBackupFor } from '../adminDirectory.js';
+import { buildDirectory, viaLabel, accessSummary, matchesPerson, strongerPermission, gitBackupFor, personalBackupOf } from '../adminDirectory.js';
 
 const users = [
   { id: 1, username: 'ahsan', email: 'a@x', role: 'superadmin' },
@@ -106,5 +106,23 @@ describe('git backup per namespace', () => {
   it('a personal workspace is not offered as a namespace backup, and nothing else means none', () => {
     expect(gitBackupFor('me@x', workspaces, connections).kind).toBe('none');
     expect(gitBackupFor('other', workspaces, connections).kind).toBe('none');
+  });
+});
+
+describe('git backup of a personal namespace', () => {
+  const workspaces = [
+    { id: 1, namespace: 'team-a', owner_id: 2, git_enabled: true },
+    { id: 3, namespace: 'me@x', owner_id: 2, is_personal: true, remote_url: 'https://x/me.git' },
+    { id: 4, namespace: 'jo@x', owner_id: 4, is_personal: true, remote_url: 'https://x/jo.git' },
+  ];
+
+  it("finds the person's own backup, never someone else's or a team namespace", () => {
+    expect(personalBackupOf(2, workspaces)).toMatchObject({ id: 3, namespace: 'me@x' });
+    expect(personalBackupOf(4, workspaces).id).toBe(4);
+  });
+
+  it('is null when the person has none', () => {
+    expect(personalBackupOf(9, workspaces)).toBeNull();
+    expect(personalBackupOf(2)).toBeNull();
   });
 });

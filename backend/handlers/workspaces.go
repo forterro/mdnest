@@ -20,7 +20,8 @@ import (
 
 // WorkspaceHandler serves per-workspace git remote configuration (multi mode).
 //
-//   - /api/admin/workspaces  (superadmin) — CRUD over shared/team workspaces.
+//   - /api/admin/workspaces  (superadmin) — CRUD over shared/team workspaces,
+//     plus turning off someone's personal Git backup (DELETE only).
 //   - /api/me/workspace      (any user)   — the caller's own personal workspace.
 //
 // The stored credential (PAT / SSH key) is never returned to a client; responses
@@ -94,7 +95,7 @@ func (h *WorkspaceHandler) requireEncryptionForMirror(gitEnabled bool) error {
 	if !gitEnabled || h.encryptionConfigured {
 		return nil
 	}
-	return errors.New("git mirroring is disabled on this server: set MDNEST_ENCRYPTION_KEY (or a non-default MDNEST_JWT_SECRET) so credentials can be sealed at rest")
+	return errors.New("git backup is disabled on this server: set MDNEST_ENCRYPTION_KEY (or a non-default MDNEST_JWT_SECRET) so credentials can be sealed at rest")
 }
 
 // requireEncryptionForCredential fails closed when a group would seal a shared
@@ -311,7 +312,7 @@ func (h *WorkspaceHandler) adminUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing.IsPersonal {
-		wsError(w, http.StatusForbidden, "personal workspaces are managed by their owner via /api/me/workspace")
+		wsError(w, http.StatusForbidden, "the git backup of a personal namespace is set up by its owner; a superadmin can only turn it off")
 		return
 	}
 	var req workspaceRequest
@@ -353,8 +354,16 @@ func (h *WorkspaceHandler) adminDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	existing, _ := h.store.Get(id)
+	// A superadmin can turn off someone's personal Git backup, for when the
+	// owner has left. Only the backup goes (its settings and the token the owner
+	// saved): the namespace, its notes and the owner's access stay, exactly as
+	// when the owner turns it off. The owner can set it up again.
 	if existing != nil && existing.IsPersonal {
-		wsError(w, http.StatusForbidden, "personal workspaces are managed by their owner")
+		if _, err := h.store.Delete(id); err != nil {
+			wsError(w, http.StatusInternalServerError, "failed to turn off the git backup")
+			return
+		}
+		wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 		return
 	}
 	deleted, err := h.store.Delete(id)
@@ -750,7 +759,7 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 		ws, err = h.store.Update(existing.ID, in)
 	}
 	if err != nil {
-		wsError(w, http.StatusInternalServerError, "failed to save workspace")
+		wsError(w, http.StatusInternalServerError, "failed to save the git backup")
 		return
 	}
 	// Only materialise the namespace once the workspace actually mirrors to a
@@ -774,11 +783,11 @@ func (h *WorkspaceHandler) mineDelete(w http.ResponseWriter, userID int) {
 		return
 	}
 	if existing == nil {
-		wsError(w, http.StatusNotFound, "no personal workspace")
+		wsError(w, http.StatusNotFound, "your personal namespace has no git backup")
 		return
 	}
 	if _, err := h.store.Delete(existing.ID); err != nil {
-		wsError(w, http.StatusInternalServerError, "failed to delete workspace")
+		wsError(w, http.StatusInternalServerError, "failed to turn off the git backup")
 		return
 	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
@@ -833,9 +842,9 @@ func requireCredentialForMirror(in store.WorkspaceInput, hasExistingCredential b
 		return nil
 	}
 	if in.Transport == "ssh" {
-		return errors.New("an SSH private key is required to enable mirroring")
+		return errors.New("an SSH private key is required to turn on the git backup")
 	}
-	return errors.New("an access token is required to enable HTTPS mirroring")
+	return errors.New("an access token is required to turn on the git backup over HTTPS")
 }
 
 // validateRemote checks the URL shape per transport and enforces the optional

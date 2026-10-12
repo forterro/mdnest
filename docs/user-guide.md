@@ -650,6 +650,26 @@ When the server is updated to a new version, active browser sessions will see a 
 
 Click "Refresh Now" to reload and pick up the latest frontend. The check runs every 60 seconds.
 
+## Git backup of your personal namespace
+
+On a server that keeps namespaces in git (multi-user, git storage), **Settings >
+Personal namespace** has a **Git backup** section. Your personal namespace is a
+namespace of your own, named after your email. Point it at a git repository you
+own and every change is pushed there, so your notes are also kept outside
+mdnest.
+
+- **Set up backup**: choose HTTPS or SSH, the repository, the branch, and a
+  token or deploy key that can write to that repository only. mdnest keeps it
+  encrypted and never shows it again; leave the field blank when you edit to
+  keep it.
+- **Pause / Resume** stops and restarts the pushes and keeps your settings.
+- **Turn off** deletes the settings and the token. Your notes stay in mdnest,
+  and what was already pushed stays in the repository.
+
+When a push fails, the reason shows under the repository. A super-admin can
+turn off your backup from your card in **Admin > People** (for example after you
+have left), but cannot point it at another repository.
+
 ## Restarting the server *(v4.8.2+)*
 
 A superadmin (or the owner of a single-user install) can restart the backend

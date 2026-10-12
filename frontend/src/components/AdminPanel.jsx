@@ -82,7 +82,7 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
           <button className={tab === 'marp-themes' ? 'active' : ''} onClick={() => setTab('marp-themes')}>Marp Themes</button>
         )}
       </div>
-      {tab === 'people' && <PeopleTab isSuperAdmin={isSuperAdmin} namespaces={manageableNs} isFederated={isFederated} userProvider={userProvider} grantMaxDepth={grantMaxDepth} directory={directory} />}
+      {tab === 'people' && <PeopleTab isSuperAdmin={isSuperAdmin} namespaces={manageableNs} isFederated={isFederated} userProvider={userProvider} grantMaxDepth={grantMaxDepth} directory={directory} git={git} />}
       {tab === 'groups' && isSuperAdmin && <GroupsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'namespaces' && <NamespacesTab isSuperAdmin={isSuperAdmin} namespaces={manageableNs} grantMaxDepth={grantMaxDepth} directory={directory} git={git} onNamespacesChanged={loadNamespaces} />}
       {tab === 'marp-themes' && isSuperAdmin && marpThemesEnabled && <MarpThemesTab />}
