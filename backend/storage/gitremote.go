@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -160,10 +161,17 @@ type RemoteSpec struct {
 // RemoteResolver resolves the mirror override for a namespace. It is
 // implemented outside the storage package (e.g. an adapter over the workspaces
 // store) so storage never imports the database layer. ok=false means the
-// namespace has no override and the env default applies.
+// namespace has no override and the env default applies — unless err is
+// ErrLocalOnly, which keeps the namespace's history local.
 type RemoteResolver interface {
 	ResolveRemote(ns string) (spec RemoteSpec, ok bool, err error)
 }
+
+// ErrLocalOnly is returned by a RemoteResolver for a namespace that has no
+// override and must NOT fall back to the env default either: its history stays
+// local. Personal namespaces use it, so turning a personal Git backup off (or
+// deleting its owner) never sends the notes to the deployment's shared remote.
+var ErrLocalOnly = errors.New("storage: namespace is local-only")
 
 // RemoteResolverFunc adapts a plain function to a RemoteResolver, so the
 // database-backed resolver can be wired in main without a named type.

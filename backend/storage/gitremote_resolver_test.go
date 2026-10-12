@@ -119,6 +119,19 @@ func TestResolvePushPrefersResolverThenEnv(t *testing.T) {
 	}
 }
 
+func TestResolvePushLocalOnlyNeverFallsBackToEnv(t *testing.T) {
+	env := remoteConfig{baseURL: "https://env.example.com/grp", username: "oauth2", branch: "main"}
+	c := NewIntervalCommitter(t.TempDir(), time.Hour, time.Hour, "ci", "ci@example.com", env)
+	defer c.Close()
+
+	// A personal namespace whose backup is off: the env default is configured,
+	// but the notes must not be pushed to the deployment's shared remote.
+	c.resolver = stubResolver{err: ErrLocalOnly}
+	if _, ok, err := c.resolvePush("someone@example.com"); ok || err != nil {
+		t.Fatalf("local-only namespace: ok=%v err=%v, want ok=false err=nil", ok, err)
+	}
+}
+
 func TestLazyResolverDelegates(t *testing.T) {
 	var l LazyResolver
 	if _, ok, _ := l.ResolveRemote("ns"); ok {

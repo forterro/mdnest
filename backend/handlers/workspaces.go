@@ -109,6 +109,14 @@ func (h *WorkspaceHandler) requireEncryptionForCredential(cred *string) error {
 
 // personalNamespace resolves the caller's personal-workspace namespace: their
 // email address, so it is recognisable.
+// IsPersonalNamespaceName reports whether ns is a personal namespace. A
+// personal namespace is named after its owner's email, and namespacePattern
+// keeps '@' out of every other namespace name, so the name alone tells — even
+// once the backup row is gone (turned off, or the owner's account deleted).
+func IsPersonalNamespaceName(ns string) bool {
+	return strings.Contains(ns, "@")
+}
+
 func (h *WorkspaceHandler) personalNamespace(userID int) (string, error) {
 	if h.users == nil {
 		return "", errors.New("user lookup unavailable")
@@ -509,7 +517,7 @@ func (h *WorkspaceHandler) provisionedImplicitNamespaces(ctx context.Context) []
 	}
 	implicit := make([]string, 0)
 	for _, ns := range names {
-		if excluded[ns] {
+		if excluded[ns] || IsPersonalNamespaceName(ns) {
 			continue
 		}
 		implicit = append(implicit, ns)

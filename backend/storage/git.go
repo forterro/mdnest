@@ -848,6 +848,9 @@ func (c *intervalCommitter) resolvePush(ns string) (pushPlan, bool, error) {
 	}
 	if c.resolver != nil {
 		spec, ok, err := c.resolver.ResolveRemote(ns)
+		if errors.Is(err, ErrLocalOnly) {
+			return pushPlan{}, false, nil
+		}
 		if err != nil {
 			return pushPlan{}, false, fmt.Errorf("git remote resolve %s: %w", ns, err)
 		}

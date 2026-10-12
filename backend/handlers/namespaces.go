@@ -153,20 +153,17 @@ func (h *NamespaceHandler) detail(r *http.Request, names []string) []NamespaceDe
 // namespace, self-managed via Settings → Git remote) from a management-plane
 // list — they are never administered by others.
 func (h *NamespaceHandler) excludePersonal(names []string) []string {
-	if h.personal == nil {
-		return names
-	}
-	ps, err := h.personal.PersonalNamespaces()
-	if err != nil {
-		return names
-	}
-	personal := make(map[string]bool, len(ps))
-	for _, p := range ps {
-		personal[p] = true
+	personal := map[string]bool{}
+	if h.personal != nil {
+		if ps, err := h.personal.PersonalNamespaces(); err == nil {
+			for _, p := range ps {
+				personal[p] = true
+			}
+		}
 	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if personal[n] {
+		if personal[n] || IsPersonalNamespaceName(n) {
 			continue
 		}
 		out = append(out, n)

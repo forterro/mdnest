@@ -378,8 +378,17 @@ func main() {
 		workspaceStore = store.NewPostgresWorkspaceStore(db, encryptionSecret)
 		wsResolver.Set(storage.RemoteResolverFunc(func(ns string) (storage.RemoteSpec, bool, error) {
 			r, err := workspaceStore.RemoteForNamespace(ns)
-			if err != nil || r == nil {
+			if err != nil {
 				return storage.RemoteSpec{}, false, err
+			}
+			if r == nil {
+				// A personal namespace only ever pushes to the repository its
+				// owner set up: backup paused, turned off or owner deleted
+				// means local-only, never the deployment default remote.
+				if handlers.IsPersonalNamespaceName(ns) {
+					return storage.RemoteSpec{}, false, storage.ErrLocalOnly
+				}
+				return storage.RemoteSpec{}, false, nil
 			}
 			return storage.RemoteSpec{
 				Transport:  r.Transport,

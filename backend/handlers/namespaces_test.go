@@ -44,6 +44,17 @@ func TestExcludePersonalNilLister(t *testing.T) {
 	}
 }
 
+// A personal namespace stays personal once its backup row is gone (backup
+// turned off, or the owner's account deleted): the email name alone excludes it.
+func TestExcludePersonalWithoutBackupRow(t *testing.T) {
+	h := NewNamespaceHandler(nil, nil, fakePersonalLister{})
+	got := h.excludePersonal([]string{"team-a", "gone@forterro.com"})
+	want := []string{"team-a"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("excludePersonal = %v, want %v", got, want)
+	}
+}
+
 // GitHub issue #123: an empty namespace list must say why, so the UI can name
 // the fix instead of always blaming "mdnest.conf mounts".
 func emptyReasonFor(t *testing.T, root string) (string, string) {

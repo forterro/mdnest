@@ -666,6 +666,9 @@ mdnest.
 - **Turn off** deletes the settings and the token. Your notes stay in mdnest,
   and what was already pushed stays in the repository.
 
+While the backup is paused or off, your notes are not pushed anywhere: never
+to a repository of the server.
+
 When a push fails, the reason shows under the repository. A super-admin can
 turn off your backup from your card in **Admin > People** (for example after you
 have left), but cannot point it at another repository.

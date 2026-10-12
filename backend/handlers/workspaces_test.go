@@ -621,3 +621,17 @@ func TestLocalDiskRefusesRuntimeNamespaces(t *testing.T) {
 		t.Errorf("status on a git backend = %s, want mirroring true", w.Body.String())
 	}
 }
+
+// The writer keeps a personal namespace local-only once its backup row is gone,
+// and recognises it by name alone. That holds only while no admin-created
+// namespace can carry an '@'.
+func TestPersonalNamespaceNameNeverMatchesAdminNamespaces(t *testing.T) {
+	if !IsPersonalNamespaceName("someone@example.com") {
+		t.Fatal("an email namespace must be recognised as personal")
+	}
+	for _, ns := range []string{"team-a", "it.operations", "a@b", "x@example.com"} {
+		if namespacePattern.MatchString(ns) && IsPersonalNamespaceName(ns) {
+			t.Fatalf("namespacePattern accepts %q, which would be taken for a personal namespace", ns)
+		}
+	}
+}
