@@ -16,6 +16,12 @@ let passed = 0, failed = 0;
 const ok = (name, cond, extra = "") => { (cond ? passed++ : failed++); console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  -> " + extra : ""}`); };
 
 let catalogOn = true;
+const BRAND_TEMPLATES = [
+  "---", "marp: true", "html: true", "theme: brand", "paginate: true", 'footer: "brand demo"', "class: light", "---", "",
+  "<!-- template: Title -->", "<!-- _class: cover -->", "", "# brand theme", "", "---", "",
+  "# Cards", "", '<div class="grid"><div class="card">A</div></div>', "", "---", "",
+  "<!-- _class: kpi light -->", "", "# Metrics",
+].join("\n");
 const created = []; // {path, body}
 const backend = createServer((req, res) => {
   const url = new URL(req.url, "http://x");
@@ -28,7 +34,7 @@ const backend = createServer((req, res) => {
     if (!catalogOn) { res.writeHead(404); res.end("404 page not found"); return; }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify([
-      { name: "brand", css: "/* @theme brand */\n@import 'gaia';\nsection.cover { color: red; }\nsection.dark {}" },
+      { name: "brand", css: "/* @theme brand */\n@import 'gaia';\nsection.cover { color: red; }\nsection.dark {}", templates: BRAND_TEMPLATES },
       { name: "minimal", css: "/* @theme minimal */\nsection { padding: 0; }" },
     ]));
     return;
@@ -71,7 +77,8 @@ async function run() {
 
   const list = await call("list_marp_themes", {});
   ok("list shows the central themes first", !list.isError && /^Central themes .*brand.*minimal/m.test(list.text), list.text.split("\n")[0]);
-  ok("a central theme lists its own and its imported classes", /brand \(classes: invert, gaia, lead, cover, dark\)/.test(list.text));
+  ok("a central theme lists its own and its imported classes", /brand \(classes: invert, gaia, lead, cover, dark;/.test(list.text), list.text.split("\n")[0]);
+  ok("a central theme lists its slide templates", /slide templates: Title, Cards, Metrics\)/.test(list.text));
   ok("built-in themes are listed too", /Built-in themes: default \(classes: invert\); gaia/.test(list.text));
 
   const noTheme = await call("create_marp", { namespace: "ns", path: "deck" });
@@ -89,9 +96,28 @@ async function run() {
   const builtin = await call("create_marp", { namespace: "ns", path: "plain", theme: "default" });
   ok("a built-in theme can still be chosen", !builtin.isError && created[1]?.body.includes("theme: default\n"));
 
+  // Slide templates: one slide per kind, each with its own class.
+  const all = await call("create_marp", { namespace: "ns", path: "full", theme: "brand", templates: ["all"], title: "Q3 review" });
+  const full = created[2]?.body || "";
+  ok("all templates: created", !all.isError, all.text.split("\n")[0]);
+  ok("all templates: the templates deck front matter is the start", full.startsWith('---\nmarp: true\nhtml: true\ntheme: brand\nclass: light\npaginate: true\nfooter: "brand demo"\n---\n'), JSON.stringify(full.slice(0, 120)));
+  ok("all templates: one slide per template, own classes kept", (full.match(/\n---\n/g) || []).length === 3 && full.includes("<!-- _class: cover -->") && full.includes("<!-- _class: kpi light -->"));
+  ok("all templates: title in the first slide, template comment dropped", full.includes("# Q3 review") && !full.includes("template:"));
+
+  const some = await call("create_marp", { namespace: "ns", path: "some", theme: "brand", templates: ["metrics", "Title"], class: "dark", footer: "Mine" });
+  const sub = created[3]?.body || "";
+  ok("picked templates in the order asked, choices on top", !some.isError && sub.indexOf("# Metrics") < sub.indexOf("# brand theme") && !sub.includes("# Cards") && sub.includes("class: dark\n") && sub.includes('footer: "Mine"'), JSON.stringify(sub.slice(0, 160)));
+
+  const before = created.length;
+  const badTpl = await call("create_marp", { namespace: "ns", path: "x", theme: "brand", templates: ["Gantt"] });
+  ok("unknown template is refused with the list", badTpl.isError && /no slide template "Gantt"/.test(badTpl.text) && /Title, Cards, Metrics/.test(badTpl.text));
+  const noTpl = await call("create_marp", { namespace: "ns", path: "x", theme: "minimal", templates: ["all"] });
+  ok("a theme without templates is refused, naming those that have some", noTpl.isError && /Themes with templates: brand/.test(noTpl.text));
+  ok("refusals create nothing", created.length === before);
+
   catalogOn = false;
   const noCatalog = await call("create_marp", { namespace: "ns", path: "legacy" });
-  ok("no catalog: theme still defaults to default", !noCatalog.isError && created[2]?.body.includes("theme: default\n"), noCatalog.text.split("\n")[0]);
+  ok("no catalog: theme still defaults to default", !noCatalog.isError && created.at(-1)?.body.includes("theme: default\n"), noCatalog.text.split("\n")[0]);
 }
 
 backend.listen(BACKEND_PORT, "127.0.0.1", () => {

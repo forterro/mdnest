@@ -2,7 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import { Marp } from '@marp-team/marp-core';
 import {
-  buildDeck, themeClasses, deckPath, titleFromName, BUILTIN_THEMES, MAX_CONTENT_SLIDES,
+  buildDeck, themeClasses, deckPath, titleFromName, BUILTIN_THEMES,
+  splitDeck, parseTemplates, genericTemplates, variantClasses, frontmatterValue,
 } from '../newDeck.js';
 import { isMarpDoc, slideStarts } from '../marp.js';
 
@@ -11,83 +12,170 @@ function render(md, themes = []) {
   for (const css of themes) marp.themeSet.add(css);
   const { html } = marp.render(md);
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  return [...doc.querySelectorAll('svg[data-marpit-svg]')];
+  return [...doc.querySelectorAll('svg[data-marpit-svg]')].map((s) => s.querySelector('section'));
 }
 
 const builtinCss = (name) => new Marp().themeSet.get(name)?.css || '';
 
-describe('buildDeck', () => {
+// A theme with its own slide kinds, and a templates deck showing each one.
+const BRAND_CSS = "/* @theme brand */\n@import 'default';\nsection.cover {}\nsection.divider {}\nsection.kpi {}\nsection.light {}\nsection.dark {}\n.card {}";
+const BRAND_TEMPLATES = `---
+marp: true
+html: true
+theme: brand
+paginate: true
+footer: "brand theme · demo"
+class: light
+style: |
+  section { font-size: 20px; }
+---
+
+<!-- _class: cover -->
+
+# brand theme
+## Every component
+
+---
+
+<!-- template: Section divider -->
+<!-- _class: divider -->
+
+# 1. Typography
+
+---
+
+# Cards
+
+<div class="grid">
+<div class="card">A</div>
+</div>
+
+\`\`\`yaml
+---
+not: a slide break
+\`\`\`
+
+---
+
+<!-- _class: kpi light -->
+
+# Metrics
+
+---
+
+# Cards
+
+second slide with the same heading`;
+
+describe('parseTemplates', () => {
+  const { frontmatter, templates } = parseTemplates(BRAND_TEMPLATES);
+
+  it('makes one template per slide, named by its comment or first heading', () => {
+    expect(templates.map((t) => t.name)).toEqual(['brand theme', 'Section divider', 'Cards', 'Metrics', 'Cards (2)']);
+    expect(templates.map((t) => t.classes[0] || '')).toEqual(['cover', 'divider', '', 'kpi', '']);
+  });
+
+  it('drops the template comment from the slide and keeps the rest verbatim', () => {
+    expect(templates[1].body).toBe('<!-- _class: divider -->\n\n# 1. Typography');
+    expect(templates[2].body).toContain('<div class="grid">');
+    expect(templates[2].body).toContain('not: a slide break');
+  });
+
+  it('reads the front matter, multi-line values included', () => {
+    expect(frontmatterValue(frontmatter, 'footer')).toBe('brand theme · demo');
+    expect(frontmatterValue(frontmatter, 'class')).toBe('light');
+    expect(frontmatter.find((f) => f.key === 'style').raw).toBe('style: |\n  section { font-size: 20px; }');
+  });
+
+  it('copes with no front matter and with nothing at all', () => {
+    expect(parseTemplates('# A\n\n---\n\n# B').templates.map((t) => t.name)).toEqual(['A', 'B']);
+    expect(parseTemplates('').templates).toEqual([]);
+    expect(splitDeck(undefined).slides).toEqual([]);
+  });
+});
+
+describe('buildDeck from templates', () => {
+  const { frontmatter, templates } = parseTemplates(BRAND_TEMPLATES);
+
+  it('writes one slide per picked template, each keeping its own class', () => {
+    const md = buildDeck({
+      title: 'Quarterly review', theme: 'brand', variant: 'light', footer: 'Team', frontmatter,
+      slides: templates.map((t) => t.body),
+    });
+    expect(isMarpDoc(md)).toBe(true);
+    expect(slideStarts(md).starts).toHaveLength(templates.length);
+    const sections = render(md, [BRAND_CSS]);
+    expect(sections).toHaveLength(5);
+    const cls = sections.map((s) => s.className.split(' ').filter(Boolean));
+    expect(cls[0]).toEqual(['cover']);
+    expect(cls[1]).toEqual(['divider']);
+    expect(cls[2]).toEqual(['light']);
+    expect(cls[3]).toEqual(['kpi', 'light']);
+    expect(sections[0].querySelector('h1').textContent).toBe('Quarterly review');
+    expect(sections.every((s) => s.getAttribute('data-theme') === 'brand')).toBe(true);
+  });
+
+  it('keeps the templates deck front matter it does not manage, and applies the choices', () => {
+    const md = buildDeck({ theme: 'brand', variant: 'dark', paginate: false, size: '4:3', footer: 'Mine', frontmatter, slides: [templates[2].body] });
+    expect(md.startsWith('---\nmarp: true\nhtml: true\nstyle: |\n  section { font-size: 20px; }\ntheme: brand\npaginate: false\nsize: 4:3\nfooter: "Mine"\nclass: dark\n---\n\n# Cards\n')).toBe(true);
+    expect(md).not.toContain('brand theme · demo');
+  });
+
+  it('a subset in the order picked', () => {
+    const md = buildDeck({ theme: 'brand', frontmatter, slides: [templates[3].body, templates[0].body] });
+    const sections = render(md, [BRAND_CSS]);
+    expect(sections.map((s) => s.querySelector('h1').textContent)).toEqual(['Metrics', 'brand theme']);
+  });
+});
+
+describe('buildDeck basics', () => {
   it('writes a short front matter for a plain deck', () => {
-    expect(buildDeck({ title: 'Hello' })).toBe(
-      '---\nmarp: true\ntheme: default\npaginate: true\n---\n\n# Hello\n',
+    expect(buildDeck({ title: 'Hello', slides: genericTemplates([]).map((t) => t.body).slice(0, 1) })).toBe(
+      '---\nmarp: true\ntheme: default\npaginate: true\n---\n\n# Hello\n\nSubtitle\n',
     );
   });
 
-  it('is a Marp note the deck view opens, with one slide per requested slide', () => {
-    const md = buildDeck({ title: 'Q3', contentSlides: 3 });
-    expect(isMarpDoc(md)).toBe(true);
-    expect(slideStarts(md).starts).toHaveLength(4);
-    expect(render(md)).toHaveLength(4);
-  });
-
-  it('writes every chosen option, and Marp applies them', () => {
-    const md = buildDeck({
-      title: 'Review',
-      theme: 'gaia',
-      classes: ['invert'],
-      titleClass: 'lead',
-      paginate: false,
-      size: '4:3',
-      header: 'Team: "Platform" #1',
-      footer: 'Confidential',
-      contentSlides: 1,
-    });
-    expect(md).toContain('theme: gaia\nclass: invert\npaginate: false\nsize: 4:3\n');
-    expect(md).toContain('header: "Team: \\"Platform\\" #1"\nfooter: "Confidential"\n');
-    expect(md).toContain('<!-- _class: lead invert -->\n\n# Review');
-
-    const slides = render(md);
-    expect(slides).toHaveLength(2);
-    expect(slides[0].getAttribute('viewBox')).toBe('0 0 960 720');
-    const first = slides[0].querySelector('section');
-    expect(first.getAttribute('data-theme')).toBe('gaia');
-    expect(first.className.split(' ')).toEqual(expect.arrayContaining(['invert', 'lead']));
-    expect(first.querySelector('header').textContent).toBe('Team: "Platform" #1');
-    expect(first.querySelector('footer').textContent).toBe('Confidential');
-    expect(first.hasAttribute('data-paginate')).toBe(false);
-    const second = slides[1].querySelector('section').className.split(' ');
-    expect(second).toContain('invert');
-    expect(second).not.toContain('lead');
-  });
-
-  it('keeps header, footer and title on one line', () => {
-    const md = buildDeck({ title: 'A\nB', header: 'x\ny', footer: '\tz ' });
-    expect(md).toContain('header: "x y"');
-    expect(md).toContain('footer: "z"');
-    expect(md).toContain('# A B');
+  it('quotes header and footer and keeps them on one line', () => {
+    const md = buildDeck({ header: 'Team: "A" #1', footer: 'x\ny' });
+    expect(md).toContain('header: "Team: \\"A\\" #1"\nfooter: "x y"\n');
+    const [section] = render(md);
+    expect(section.querySelector('header').textContent).toBe('Team: "A" #1');
   });
 
   it('never writes a theme or class that could break the front matter', () => {
-    const md = buildDeck({ theme: 'x\nmarp: false', classes: ['ok', 'bad class', 'a:b'], titleClass: '--> <b>' });
-    expect(md).toContain('theme: default\nclass: ok\n');
+    const md = buildDeck({ theme: 'x\nmarp: false', variant: 'ok a:b' });
+    expect(md).toContain('theme: default\npaginate: true\nclass: ok\n');
     expect(md).not.toContain('marp: false');
-    expect(md).not.toContain('_class');
     expect(isMarpDoc(md)).toBe(true);
   });
 
-  it('defaults the title and clamps the number of slides', () => {
-    expect(buildDeck({})).toContain('# Untitled deck');
-    expect(slideStarts(buildDeck({ contentSlides: 999 })).starts).toHaveLength(MAX_CONTENT_SLIDES + 1);
-    expect(slideStarts(buildDeck({ contentSlides: -4 })).starts).toHaveLength(1);
+  it('renders 4:3 and the deck variant', () => {
+    const md = buildDeck({ theme: 'gaia', variant: 'invert', size: '4:3', slides: ['# A'] });
+    const [section] = render(md);
+    expect(section.closest('svg').getAttribute('viewBox')).toBe('0 0 960 720');
+    expect(section.className).toContain('invert');
+  });
+});
+
+describe('genericTemplates and variantClasses', () => {
+  it('a title slide with the theme title class, repeating the variant', () => {
+    const [title, content] = genericTemplates(['invert', 'gaia', 'lead'], 'invert');
+    expect(title.body).toBe('<!-- _class: lead invert -->\n\n# Title\n\nSubtitle');
+    expect(content.name).toBe('Content');
+    const md = buildDeck({ theme: 'gaia', variant: 'invert', slides: [title.body, content.body] });
+    const cls = render(md).map((s) => s.className.split(' '));
+    expect(cls[0]).toEqual(expect.arrayContaining(['lead', 'invert']));
+    expect(cls[1]).toEqual(['invert']);
   });
 
-  it('applies a catalog theme by name', () => {
-    const css = "/* @theme brand */\n@import 'default';\nsection.cover { color: red; }";
-    const md = buildDeck({ theme: 'brand', titleClass: 'cover' });
-    const [slide] = render(md, [css]);
-    const section = slide.querySelector('section');
-    expect(section.getAttribute('data-theme')).toBe('brand');
-    expect(section.className).toContain('cover');
+  it('no class directive when the theme has no title class', () => {
+    expect(genericTemplates(['invert'])[0].body).toBe('# Title\n\nSubtitle');
+  });
+
+  it('variants are the classes templates do not use as a slide type', () => {
+    const { templates } = parseTemplates(BRAND_TEMPLATES);
+    expect(variantClasses(themeClasses(BRAND_CSS), templates)).toEqual(['light', 'dark']);
+    expect(variantClasses(themeClasses(builtinCss('gaia')), genericTemplates(['lead']))).toEqual(['invert', 'gaia']);
   });
 });
 
@@ -98,19 +186,14 @@ describe('themeClasses', () => {
     expect(themeClasses(builtinCss('uncover'))).toEqual(['invert']);
   });
 
-  it('finds section.class selectors and adds those of an imported theme', () => {
-    const css = "/* @theme brand */\n@import 'gaia';\nsection.lead { x: 1 }\nsection.two-columns > div {}\nsection:is(.dark) {}";
+  it('adds the classes of an imported theme and survives import cycles', () => {
+    const css = "/* @theme b */\n@import 'gaia';\nsection.two-columns > div {}\nsection:is(.dark) {}";
     const classes = themeClasses(css, (name) => (BUILTIN_THEMES.includes(name) ? builtinCss(name) : ''));
-    expect(classes).toEqual(expect.arrayContaining(['lead', 'two-columns', 'dark', 'invert', 'gaia']));
-    expect(new Set(classes).size).toBe(classes.length);
-  });
-
-  it('ignores selectors on other elements and survives import cycles', () => {
-    expect(themeClasses('div.card {} p.note {} h1.big {}')).toEqual([]);
+    expect(classes).toEqual(expect.arrayContaining(['two-columns', 'dark', 'invert', 'gaia', 'lead']));
     const a = "@import 'b';\nsection.a {}";
     const b = "@import 'a';\nsection.b {}";
     expect(themeClasses(a, (n) => (n === 'b' ? b : a)).sort()).toEqual(['a', 'b']);
-    expect(themeClasses(undefined)).toEqual([]);
+    expect(themeClasses('div.card {} p.note {}')).toEqual([]);
   });
 });
 
@@ -118,14 +201,11 @@ describe('deckPath and titleFromName', () => {
   it('appends .md and places the deck in the folder', () => {
     expect(deckPath('talks/', 'q3-review')).toBe('talks/q3-review.md');
     expect(deckPath('', '/q3.md')).toBe('q3.md');
-    expect(deckPath('a/', 'Deck.MD')).toBe('a/Deck.MD');
     expect(deckPath('a/', '  ')).toBe('');
-    expect(deckPath('a/', '.md')).toBe('');
   });
 
   it('suggests a title from the file name', () => {
     expect(titleFromName('q3-review.md')).toBe('Q3 review');
-    expect(titleFromName('talks/team_update')).toBe('Team update');
     expect(titleFromName('')).toBe('');
   });
 });

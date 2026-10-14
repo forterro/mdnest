@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createNoteWithContent } from '../api.js';
 import { loadWithRetry } from '../lazyWithRetry.js';
 import ChunkErrorBoundary from './ChunkErrorBoundary.jsx';
 import {
-  BUILTIN_THEMES, SLIDE_SIZES, MAX_CONTENT_SLIDES, buildDeck, deckPath, themeClasses, titleFromName,
+  BUILTIN_THEMES, SLIDE_SIZES, buildDeck, deckPath, themeClasses, titleFromName,
+  parseTemplates, genericTemplates, variantClasses, frontmatterValue,
 } from '../newDeck.js';
 
 // The preview is the deck viewer itself, so it shows exactly what the note
@@ -11,30 +12,30 @@ import {
 const loadDeckModule = () => loadWithRetry(() => import('./MarpDeck.jsx'));
 const MarpDeck = lazy(loadDeckModule);
 
-// NewDeckModal — "+ Slides": names a new Marp deck and sets its front matter
-// (theme, slide styles, size, slide numbers, header, footer) and a starter
-// outline, with a live preview, then creates the note in `dir`.
+// NewDeckModal — "+ Slides": a new Marp deck built from slide templates.
 //
-// Themes are Marp's built-in ones plus the theme catalog (Admin > Marp Themes,
-// when enabled). The styles offered are the slide classes the chosen theme's
-// stylesheet defines, including those of a theme it @imports.
+// A catalog theme (Admin > Marp Themes) can carry a templates deck, one slide
+// per kind of slide; each is offered here and every one picked becomes a
+// slide of the new deck, keeping its own class (title, metrics, …). Themes
+// without one (the built-in ones) get a title and a content template. The
+// deck's variant (e.g. light or dark) is one class for the whole deck; the
+// templates deck's front matter sets the starting values.
 export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
   const [name, setName] = useState('');
   const [title, setTitle] = useState('');
   const [titleEdited, setTitleEdited] = useState(false);
   const [theme, setTheme] = useState('default');
-  const [classes, setClasses] = useState([]);
-  const [titleClass, setTitleClass] = useState('');
+  const [variant, setVariant] = useState('');
+  const [picked, setPicked] = useState(() => new Set());
   const [paginate, setPaginate] = useState(true);
   const [size, setSize] = useState(SLIDE_SIZES[0]);
   const [header, setHeader] = useState('');
   const [footer, setFooter] = useState('');
-  const [contentSlides, setContentSlides] = useState(2);
-  const [catalog, setCatalog] = useState([]); // [{name, css}]
+  const [catalog, setCatalog] = useState([]); // [{name, css, templates}]
   const [builtinCss, setBuiltinCss] = useState({}); // name -> css
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const pickedTitleClass = useRef(false);
 
   // Escape closes the dialog wherever the focus is (a button that was
   // disabled while creating drops it to the page).
@@ -53,10 +54,15 @@ export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
         const css = m.builtinThemeCss(BUILTIN_THEMES);
         const themes = await m.loadThemes();
         if (cancelled) return;
+        const list = Array.isArray(themes) ? themes : [];
         setBuiltinCss(css);
-        setCatalog(Array.isArray(themes) ? themes : []);
+        setCatalog(list);
+        // A catalog theme with templates is the house style: start from it.
+        const first = list.find((t) => (t.templates || '').trim()) || list[0];
+        if (first) setTheme(first.name);
       })
-      .catch(() => { /* built-in themes only, styles unknown; the preview says why */ });
+      .catch(() => { /* built-in themes only; the preview says why */ })
+      .finally(() => { if (!cancelled) setLoaded(true); });
     return () => { cancelled = true; };
   }, []);
 
@@ -73,28 +79,42 @@ export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
     return names;
   }, [catalog]);
 
-  const available = useMemo(
+  const classes = useMemo(
     () => themeClasses(cssByName[theme], (n) => cssByName[n] || ''),
     [cssByName, theme],
   );
 
-  // Changing theme drops styles the new theme does not have, and suggests
-  // `lead` for the title slide (Marp's usual title style) until the user picks.
+  const fromTheme = useMemo(
+    () => parseTemplates(catalog.find((t) => t.name === theme)?.templates || ''),
+    [catalog, theme],
+  );
+  const hasOwnTemplates = fromTheme.templates.length > 0;
+  const templates = hasOwnTemplates ? fromTheme.templates : genericTemplates(classes, variant);
+  const variants = useMemo(() => variantClasses(classes, templates), [classes, templates]);
+
+  // A theme change starts over from that theme: every template picked, and
+  // the front matter of its templates deck as the starting values.
   useEffect(() => {
-    setClasses((cur) => cur.filter((c) => available.includes(c)));
-    if (!pickedTitleClass.current) setTitleClass(available.includes('lead') ? 'lead' : '');
-    else setTitleClass((cur) => (available.includes(cur) ? cur : ''));
-  }, [available]);
+    const fm = fromTheme.frontmatter;
+    setPicked(new Set((hasOwnTemplates ? fromTheme.templates : genericTemplates(classes)).map((t) => t.id)));
+    setVariant(frontmatterValue(fm, 'class'));
+    setFooter(frontmatterValue(fm, 'footer'));
+    setHeader(frontmatterValue(fm, 'header'));
+    setPaginate(frontmatterValue(fm, 'paginate') !== 'false');
+    setSize(SLIDE_SIZES.includes(frontmatterValue(fm, 'size')) ? frontmatterValue(fm, 'size') : SLIDE_SIZES[0]);
+  }, [theme, fromTheme, hasOwnTemplates, classes]);
 
   const effectiveTitle = titleEdited ? title : titleFromName(name);
+  const chosen = templates.filter((t) => picked.has(t.id));
   const content = useMemo(() => buildDeck({
-    title: effectiveTitle, theme, classes, titleClass, paginate, size, header, footer, contentSlides,
-  }), [effectiveTitle, theme, classes, titleClass, paginate, size, header, footer, contentSlides]);
+    title: effectiveTitle, theme, variant, paginate, size, header, footer,
+    frontmatter: fromTheme.frontmatter, slides: chosen.map((t) => t.body),
+  }), [effectiveTitle, theme, variant, paginate, size, header, footer, fromTheme, chosen]);
 
   const path = deckPath(dir, name);
 
   const create = async () => {
-    if (!path || busy) return;
+    if (!path || !chosen.length || busy) return;
     setBusy(true);
     setError('');
     try {
@@ -112,7 +132,11 @@ export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
     setBusy(false);
   };
 
-  const toggleClass = (c) => setClasses((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c]));
+  const toggle = (id) => setPicked((cur) => {
+    const next = new Set(cur);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
@@ -127,7 +151,7 @@ export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
         <div className="newdeck-where">In <code>{namespace}:/{dir}</code></div>
 
         <div className="newdeck-grid">
-          <label className="newdeck-field newdeck-wide">
+          <label className="newdeck-field">
             <span>Name</span>
             <input
               type="text"
@@ -141,7 +165,7 @@ export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
               data-testid="new-deck-name"
             />
           </label>
-          <label className="newdeck-field newdeck-wide">
+          <label className="newdeck-field">
             <span>Title</span>
             <input
               type="text"
@@ -155,54 +179,47 @@ export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
           </label>
           <label className="newdeck-field">
             <span>Theme</span>
-            <select className="modal-input" value={theme} onChange={(e) => setTheme(e.target.value)} disabled={busy} data-testid="new-deck-theme">
+            <select className="modal-input" value={theme} onChange={(e) => setTheme(e.target.value)} disabled={busy || !loaded} data-testid="new-deck-theme">
               {themeNames.map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </label>
           <label className="newdeck-field">
-            <span>Title slide style</span>
-            <select
-              className="modal-input"
-              value={titleClass}
-              onChange={(e) => { pickedTitleClass.current = true; setTitleClass(e.target.value); }}
-              disabled={busy}
-              data-testid="new-deck-title-class"
-            >
-              <option value="">Same as the others</option>
-              {available.map((c) => <option key={c} value={c}>{c}</option>)}
+            <span>Look of the deck</span>
+            <select className="modal-input" value={variant} onChange={(e) => setVariant(e.target.value)} disabled={busy} data-testid="new-deck-variant">
+              <option value="">Theme default</option>
+              {variant && !variants.includes(variant) && <option value={variant}>{variant}</option>}
+              {variants.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
-          {available.length > 0 && (
-            <div className="newdeck-field newdeck-wide">
-              <span>Style of every slide</span>
-              <div className="newdeck-classes" data-testid="new-deck-classes">
-                {available.map((c) => (
-                  <label key={c} className="newdeck-check">
-                    <input type="checkbox" checked={classes.includes(c)} onChange={() => toggleClass(c)} disabled={busy} />
-                    {c}
-                  </label>
-                ))}
-              </div>
+
+          <div className="newdeck-field newdeck-wide">
+            <div className="newdeck-slides-head">
+              <span>Slides ({chosen.length} of {templates.length}){hasOwnTemplates ? '' : ' · this theme has no slide templates'}</span>
+              <span className="newdeck-slides-bulk">
+                <button type="button" className="newdeck-link" onClick={() => setPicked(new Set(templates.map((t) => t.id)))} disabled={busy} data-testid="new-deck-all">All</button>
+                <button type="button" className="newdeck-link" onClick={() => setPicked(new Set())} disabled={busy} data-testid="new-deck-none">None</button>
+              </span>
             </div>
-          )}
+            <div className="newdeck-slides" data-testid="new-deck-templates">
+              {templates.map((t) => (
+                <label key={t.id} className="newdeck-check" title={t.name + (t.classes.length ? ` (class: ${t.classes.join(' ')})` : '')}>
+                  <input type="checkbox" checked={picked.has(t.id)} onChange={() => toggle(t.id)} disabled={busy} />
+                  <span className="newdeck-slide-name">{t.name}</span>
+                  {t.classes[0] && <span className="newdeck-slide-class">{t.classes[0]}</span>}
+                </label>
+              ))}
+            </div>
+          </div>
+
           <label className="newdeck-field">
             <span>Size</span>
             <select className="modal-input" value={size} onChange={(e) => setSize(e.target.value)} disabled={busy} data-testid="new-deck-size">
               {SLIDE_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
-          <label className="newdeck-field">
-            <span>Content slides</span>
-            <input
-              type="number"
-              className="modal-input"
-              min={0}
-              max={MAX_CONTENT_SLIDES}
-              value={contentSlides}
-              onChange={(e) => setContentSlides(Math.max(0, Math.min(MAX_CONTENT_SLIDES, Number(e.target.value) || 0)))}
-              disabled={busy}
-              data-testid="new-deck-slides"
-            />
+          <label className="newdeck-check newdeck-paginate">
+            <input type="checkbox" checked={paginate} onChange={(e) => setPaginate(e.target.checked)} disabled={busy} data-testid="new-deck-paginate" />
+            Slide numbers
           </label>
           <label className="newdeck-field">
             <span>Header</span>
@@ -212,24 +229,24 @@ export default function NewDeckModal({ namespace, dir, onClose, onCreated }) {
             <span>Footer</span>
             <input type="text" className="modal-input" value={footer} onChange={(e) => setFooter(e.target.value)} disabled={busy} data-testid="new-deck-footer" />
           </label>
-          <label className="newdeck-check newdeck-wide">
-            <input type="checkbox" checked={paginate} onChange={(e) => setPaginate(e.target.checked)} disabled={busy} data-testid="new-deck-paginate" />
-            Slide numbers
-          </label>
         </div>
 
         <div className="newdeck-preview" data-testid="new-deck-preview">
-          <ChunkErrorBoundary label="the slide preview">
-            <Suspense fallback={<div className="editor-loading">Loading preview…</div>}>
-              <MarpDeck content={content} title={path || 'New slides'} exportable={false} />
-            </Suspense>
-          </ChunkErrorBoundary>
+          {chosen.length ? (
+            <ChunkErrorBoundary label="the slide preview">
+              <Suspense fallback={<div className="editor-loading">Loading preview…</div>}>
+                <MarpDeck content={content} title={path || 'New slides'} exportable={false} />
+              </Suspense>
+            </ChunkErrorBoundary>
+          ) : (
+            <div className="newdeck-empty">Pick at least one slide.</div>
+          )}
         </div>
 
         {error && <div className="modal-error" role="alert">{error}</div>}
         <div className="modal-actions">
           <button type="button" className="modal-btn" onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" className="modal-btn-primary" onClick={create} disabled={!path || busy} data-testid="new-deck-create">
+          <button type="button" className="modal-btn-primary" onClick={create} disabled={!path || !chosen.length || busy} data-testid="new-deck-create">
             {busy ? 'Creating…' : 'Create'}
           </button>
         </div>

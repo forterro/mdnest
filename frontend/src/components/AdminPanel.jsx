@@ -96,6 +96,8 @@ function MarpThemesTab() {
   const [selected, setSelected] = useState(null); // theme name, or '__new__'
   const [name, setName] = useState('');
   const [css, setCss] = useState('');
+  const [templates, setTemplates] = useState('');
+  const [part, setPart] = useState('css'); // 'css' | 'templates'
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [status, setStatus] = useState('');
@@ -108,17 +110,18 @@ function MarpThemesTab() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const openTheme = (t) => { setSelected(t.name); setName(t.name); setCss(t.css); setErr(''); setStatus(''); };
+  const openTheme = (t) => { setSelected(t.name); setName(t.name); setCss(t.css); setTemplates(t.templates || ''); setPart('css'); setErr(''); setStatus(''); };
   const openNew = () => {
     setSelected('__new__'); setName('');
     setCss("/* @theme my-theme */\n@import 'default';\n\nsection {\n}\n");
+    setTemplates(''); setPart('css');
     setErr(''); setStatus('');
   };
 
   const save = async () => {
     setErr(''); setStatus(''); setBusy(true);
     try {
-      await saveMarpTheme(name.trim(), css);
+      await saveMarpTheme(name.trim(), css, templates);
       clearMarpThemeCache();
       setStatus('Saved. Open decks pick it up on reload.');
       setSelected(name.trim());
@@ -133,7 +136,7 @@ function MarpThemesTab() {
     try {
       await deleteMarpTheme(t);
       clearMarpThemeCache();
-      if (selected === t) { setSelected(null); setName(''); setCss(''); }
+      if (selected === t) { setSelected(null); setName(''); setCss(''); setTemplates(''); }
       await load();
     } catch (e) { setErr(e.message || 'Delete failed'); }
     finally { setBusy(false); }
@@ -171,13 +174,38 @@ function MarpThemesTab() {
                 disabled={selected !== '__new__'}
               />
             </label>
-            <textarea
-              className="marp-theme-css"
-              value={css}
-              onChange={(e) => setCss(e.target.value)}
-              spellCheck={false}
-              rows={22}
-            />
+            <div className="marp-theme-parts" role="tablist">
+              <button type="button" role="tab" aria-selected={part === 'css'} className={part === 'css' ? 'active' : ''} onClick={() => setPart('css')}>CSS</button>
+              <button type="button" role="tab" aria-selected={part === 'templates'} className={part === 'templates' ? 'active' : ''} onClick={() => setPart('templates')}>Slide templates</button>
+            </div>
+            {part === 'css' ? (
+              <textarea
+                className="marp-theme-css"
+                value={css}
+                onChange={(e) => setCss(e.target.value)}
+                spellCheck={false}
+                rows={22}
+                aria-label="Theme CSS"
+              />
+            ) : (
+              <>
+                <p className="admin-hint">
+                  Optional. A Marp deck that uses this theme, one slide per kind of slide. <strong>+ Slides</strong> offers
+                  each slide as a template and builds a new deck from the ones picked; its front matter
+                  (<code>html</code>, <code>class</code>, <code>footer</code>…) is the starting point. Name a template
+                  with <code>&lt;!-- template: Cards --&gt;</code> in its slide, or it is named after its first heading.
+                </p>
+                <textarea
+                  className="marp-theme-css"
+                  value={templates}
+                  onChange={(e) => setTemplates(e.target.value)}
+                  spellCheck={false}
+                  rows={20}
+                  aria-label="Slide templates"
+                  data-testid="marp-theme-templates"
+                />
+              </>
+            )}
             {err && <div className="admin-error">{err}</div>}
             {status && <div className="admin-hint">{status}</div>}
             <div className="marp-theme-actions">

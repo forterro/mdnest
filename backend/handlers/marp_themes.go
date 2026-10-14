@@ -26,6 +26,14 @@ var starterTheme string
 // maxThemeBytes caps a single theme stylesheet.
 const maxThemeBytes = 512 * 1024
 
+// maxTemplatesBytes caps a theme's slide templates deck.
+const maxTemplatesBytes = 512 * 1024
+
+// templatesSuffix names a theme's optional slide templates: a Marp deck
+// stored next to <name>.css, one slide per template. The "+ Slides" dialog
+// and the MCP create_marp tool build a new deck from the slides picked in it.
+const templatesSuffix = ".slides.md"
+
 // themeNameRe validates a theme's name — it doubles as the CSS filename
 // (<name>.css), so it must be a safe, traversal-free slug and also a valid
 // Marp `@theme` identifier.
@@ -45,8 +53,18 @@ func NewMarpThemeHandler(store storage.Storage) *MarpThemeHandler {
 }
 
 type marpTheme struct {
-	Name string `json:"name"`
-	CSS  string `json:"css"`
+	Name      string `json:"name"`
+	CSS       string `json:"css"`
+	Templates string `json:"templates"`
+}
+
+// marpThemeWrite is an upsert body. Templates is a pointer so that a client
+// which does not know about templates (it sends only name and css) leaves the
+// stored templates alone; an empty string removes them.
+type marpThemeWrite struct {
+	Name      string  `json:"name"`
+	CSS       string  `json:"css"`
+	Templates *string `json:"templates"`
 }
 
 // Handle routes /api/marp/themes. GET is open to any authenticated user; POST
@@ -108,16 +126,20 @@ func (h *MarpThemeHandler) readAll(ctx context.Context) ([]marpTheme, error) {
 		if rerr != nil {
 			continue
 		}
+		name := strings.TrimSuffix(e.Name, ".css")
+		// Templates are optional: a missing or unreadable file means none.
+		tpl, _ := h.store.ReadFile(ctx, storage.SystemNamespaceMarpThemes, name+templatesSuffix)
 		themes = append(themes, marpTheme{
-			Name: strings.TrimSuffix(e.Name, ".css"),
-			CSS:  string(data),
+			Name:      name,
+			CSS:       string(data),
+			Templates: string(tpl),
 		})
 	}
 	return themes, nil
 }
 
 func (h *MarpThemeHandler) upsert(w http.ResponseWriter, r *http.Request) {
-	var req marpTheme
+	var req marpThemeWrite
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
@@ -135,16 +157,37 @@ func (h *MarpThemeHandler) upsert(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"css too large"}`, http.StatusRequestEntityTooLarge)
 		return
 	}
+	if req.Templates != nil && len(*req.Templates) > maxTemplatesBytes {
+		http.Error(w, `{"error":"templates too large"}`, http.StatusRequestEntityTooLarge)
+		return
+	}
 	_ = h.store.MkdirAll(r.Context(), storage.SystemNamespaceMarpThemes, "")
 	if err := h.store.WriteFile(r.Context(), storage.SystemNamespaceMarpThemes, name+".css", []byte(req.CSS)); err != nil {
 		log.Printf("marp themes: write %q failed: %v", name, err)
 		http.Error(w, `{"error":"failed to save theme"}`, http.StatusInternalServerError)
 		return
 	}
-	log.Printf("marp theme saved: %q (%d bytes)", name, len(req.CSS))
+	tplPath := name + templatesSuffix
+	if req.Templates != nil {
+		var terr error
+		if strings.TrimSpace(*req.Templates) == "" {
+			if err := h.store.Remove(r.Context(), storage.SystemNamespaceMarpThemes, tplPath); err != nil && !errors.Is(err, storage.ErrNotExist) {
+				terr = err
+			}
+		} else {
+			terr = h.store.WriteFile(r.Context(), storage.SystemNamespaceMarpThemes, tplPath, []byte(*req.Templates))
+		}
+		if terr != nil {
+			log.Printf("marp themes: templates of %q failed: %v", name, terr)
+			http.Error(w, `{"error":"failed to save slide templates"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+	tpl, _ := h.store.ReadFile(r.Context(), storage.SystemNamespaceMarpThemes, tplPath)
+	log.Printf("marp theme saved: %q (%d bytes css, %d bytes templates)", name, len(req.CSS), len(tpl))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(marpTheme{Name: name, CSS: req.CSS})
+	json.NewEncoder(w).Encode(marpTheme{Name: name, CSS: req.CSS, Templates: string(tpl)})
 }
 
 func (h *MarpThemeHandler) remove(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +200,11 @@ func (h *MarpThemeHandler) remove(w http.ResponseWriter, r *http.Request) {
 		log.Printf("marp themes: delete %q failed: %v", name, err)
 		http.Error(w, `{"error":"failed to delete theme"}`, http.StatusInternalServerError)
 		return
+	}
+	// The theme's templates go with it; a leftover would come back with a new
+	// theme of the same name.
+	if err := h.store.Remove(r.Context(), storage.SystemNamespaceMarpThemes, name+templatesSuffix); err != nil && !errors.Is(err, storage.ErrNotExist) {
+		log.Printf("marp themes: delete templates of %q failed: %v", name, err)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})

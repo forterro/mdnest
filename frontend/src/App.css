@@ -5735,6 +5735,9 @@ pre:hover .code-copy-btn {
 .marp-theme-name-field input { background:var(--bg); border:1px solid var(--border); border-radius:4px; color:var(--text); padding:6px 8px; }
 .marp-theme-css { width:100%; box-sizing:border-box; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.78rem; line-height:1.45; resize:vertical; }
 .marp-theme-actions { display:flex; justify-content:flex-end; }
+.marp-theme-parts { display:flex; gap:4px; }
+.marp-theme-parts button { background:var(--surface-2); color:var(--text-secondary); border:1px solid var(--border); border-radius:6px; padding:4px 10px; font-size:0.8rem; cursor:pointer; }
+.marp-theme-parts button.active { background:var(--accent); color:var(--text-inverse); border-color:var(--accent); }
 
 /* ===== Access "Groups" admin tab ===== */
 /* Separate the create form from the intro above and the group list below. */
@@ -7103,7 +7106,46 @@ pre:hover .code-copy-btn {
   color: var(--text-muted);
 }
 .newdeck-wide { grid-column: 1 / -1; }
-.newdeck-classes { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; }
+.newdeck-slides-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.newdeck-slides-bulk { display: inline-flex; gap: 0.6rem; }
+.newdeck-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.newdeck-link:disabled { color: var(--text-muted); cursor: default; }
+.newdeck-slides {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.25rem 0.9rem;
+  max-height: 9.5rem;
+  overflow-y: auto;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.newdeck-slides .newdeck-check { min-width: 0; }
+.newdeck-slide-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.newdeck-slide-class {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+.newdeck-paginate { align-self: end; padding-bottom: 0.45rem; }
+.newdeck-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
 .newdeck-check {
   display: inline-flex;
   align-items: center;

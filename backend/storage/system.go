@@ -9,7 +9,8 @@ package storage
 // can read them from the coherence tier.
 const (
 	// SystemNamespaceMarpThemes stores the centralized Marp theme catalog
-	// (one <name>.css per theme). Managed by superadmins; readable by all.
+	// (one <name>.css per theme, plus optional <name>.slides.md slide
+	// templates). Managed by superadmins; readable by all.
 	SystemNamespaceMarpThemes = ".marp-themes"
 )
 

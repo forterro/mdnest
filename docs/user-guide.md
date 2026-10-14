@@ -133,7 +133,7 @@ At the top of the sidebar:
 - **+ Folder** -- creates a new folder. You will be prompted for a name.
 - **+ Note** -- creates a new markdown file. You will be prompted for a filename.
 - **+ Drawing** -- creates a new `.excalidraw.md` drawing (when drawings are enabled).
-- **+ Slides** -- creates a new Marp slide deck (when slides are enabled). A dialog asks for the name and title, then sets up the deck: the theme (Marp's built-in ones and the themes of **Admin > Marp Themes**), the style of the title slide and of every slide (the classes the theme defines, such as `lead` or `invert`), the size (16:9 or 4:3), slide numbers, a header and a footer, and how many content slides to start with. A live preview shows the deck before you create it.
+- **+ Slides** -- creates a new Marp slide deck (when slides are enabled). A dialog asks for the name and title, the theme (the themes of **Admin > Marp Themes** first, then Marp's built-in ones) and the look of the whole deck (a class such as `light` or `dark`). Then pick the slides: a theme with slide templates offers each kind of slide it has (title, section divider, cards, metrics, timeline…), so you can take all of them or only some, and each becomes one slide with its own style. A theme without templates offers a title slide and a content slide. Size (16:9 or 4:3), slide numbers, header and footer complete it, and a live preview shows the deck before you create it.
 
 **Where new items are created** *(clarified in v4.2.1)*: click a folder in the
 tree to aim these buttons at it — the folder is highlighted, and each button's

@@ -946,19 +946,21 @@ export async function deleteComment(ns, path, commentId) {
 
 // --- Marp themes (centralized presentation catalog) ---
 
-// getMarpThemes returns the shared Marp theme catalog: [{name, css}]. Readable
-// by any authenticated user; used by MarpDeck to register themes globally.
+// getMarpThemes returns the shared Marp theme catalog: [{name, css, templates}].
+// Readable by any authenticated user; used by MarpDeck to register themes
+// globally. `templates` is the theme's slide templates deck ('' when none).
 export async function getMarpThemes() {
   const res = await request('/marp/themes');
   if (!res.ok) return [];
   return res.json();
 }
 
-export async function saveMarpTheme(name, css) {
+// templates: the slide templates deck; '' removes it, undefined leaves it as is.
+export async function saveMarpTheme(name, css, templates) {
   const res = await request('/marp/themes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, css }),
+    body: JSON.stringify(templates === undefined ? { name, css } : { name, css, templates }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

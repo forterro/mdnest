@@ -1473,6 +1473,16 @@ Themes are stored one `<name>.css` per theme in the reserved, hidden
 `.marp-themes` namespace, which is excluded from every namespace listing and from
 the grant and admin pickers, and is never mirrored to a per-workspace git remote.
 
+`GET` returns `[{"name", "css", "templates"}]`. `templates` is the theme's
+optional slide templates: a Marp deck, one slide per kind of slide, that
+**+ Slides** and the MCP `create_marp` tool build new decks from (`""` when the
+theme has none). A slide is named by a `<!-- template: Name -->` comment, or
+else by its first heading. They are stored next to the stylesheet as
+`<name>.slides.md` (512 KB at most) and deleted with the theme.
+
+`PUT` (or `POST`) takes `{"name", "css", "templates"}`. Leave `templates` out to
+keep the stored templates as they are, or send `""` to remove them.
+
 ## Comments
 
 > **Requires multi-user mode with live collab enabled** (`AUTH_MODE=multi` and `ENABLE_LIVE_COLLAB=true`). The `/api/comments` route is only registered under that combination; in any other mode the endpoints return 404. All endpoints require a valid JWT.
