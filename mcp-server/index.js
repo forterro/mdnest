@@ -194,6 +194,52 @@ export function buildMarpDeck({ title = "Untitled deck", theme = "default", pagi
   return fm.join("\n") + "\n\n" + body.join("\n\n---\n\n") + "\n";
 }
 
+// Marp's built-in themes and the slide classes their stylesheets define (as
+// marp-core ships them). Catalog themes often @import one of these.
+export const MARP_BUILTIN_THEMES = { default: ["invert"], gaia: ["invert", "gaia", "lead"], uncover: ["invert"] };
+
+// marpThemeClasses lists the slide classes a theme stylesheet styles
+// (`section.lead`, `section:where(.invert)`), plus those of an @imported
+// built-in theme. Same rule as the app's "+ Slides" dialog (frontend/src/newDeck.js).
+export function marpThemeClasses(css) {
+  const out = [];
+  const add = (c) => { if (MARP_IDENT.test(c) && !out.includes(c)) out.push(c); };
+  const text = String(css || "");
+  for (const m of text.matchAll(/@import\s+(?:url\()?\s*['"]([^'"]+)['"]/g)) {
+    for (const c of MARP_BUILTIN_THEMES[m[1]] || []) add(c);
+  }
+  for (const m of text.matchAll(/section(?:\.([A-Za-z_][\w-]*)|:(?:where|is)\(\s*\.([A-Za-z_][\w-]*))/g)) add(m[1] || m[2]);
+  return out;
+}
+
+// marpThemeChoices lists the themes a deck can use: the server's central
+// catalog (Admin > Marp Themes; empty when the catalog is off) and the built-in
+// ones. `catalog` is null when the catalog could not be read.
+async function marpThemeChoices() {
+  let catalog = [];
+  try {
+    const res = await api("/api/marp/themes");
+    if (res.ok) {
+      const list = await res.json();
+      catalog = (Array.isArray(list) ? list : []).map((t) => ({ name: t.name, classes: marpThemeClasses(t.css) }));
+    } else if (res.status !== 404) {
+      catalog = null;
+    }
+  } catch {
+    catalog = null;
+  }
+  const builtin = Object.entries(MARP_BUILTIN_THEMES).map(([name, classes]) => ({ name, classes }));
+  return { catalog, builtin };
+}
+
+function describeThemes({ catalog, builtin }) {
+  const fmt = (t) => `${t.name}${t.classes.length ? ` (classes: ${t.classes.join(", ")})` : ""}`;
+  const lines = [];
+  if (catalog && catalog.length) lines.push(`Central themes (Admin > Marp Themes): ${catalog.map(fmt).join("; ")}`);
+  lines.push(`Built-in themes: ${builtin.map(fmt).join("; ")}`);
+  return lines.join("\n");
+}
+
 // splitMarp separates a Marp note into its leading YAML frontmatter and an
 // array of slide bodies. Slide boundaries are `---` lines preceded by a blank
 // line and outside fenced code blocks — the same rule the app's slide preview
@@ -1664,13 +1710,24 @@ if (features.excalidraw) server.tool(
 );
 
 if (features.marp) server.tool(
+  "list_marp_themes",
+  "List the themes a Marp deck can use: the server's central themes (Admin > Marp Themes) and Marp's built-in themes, each with the slide classes it defines (for `class` or a slide's `<!-- _class: ... -->`). Call it before create_marp and let the user choose the theme.",
+  {},
+  async () => {
+    const choices = await marpThemeChoices();
+    const note = choices.catalog === null ? "\n(The central theme catalog could not be read.)" : "";
+    return { content: [{ type: "text", text: describeThemes(choices) + note + "\n" + JSON.stringify(choices) }] };
+  }
+);
+
+if (features.marp) server.tool(
   "create_marp",
-  "Create a Marp slide-deck note. Scaffolds a `.md` note whose frontmatter carries `marp: true`, with slides separated by `---`. Provide `slides` (one markdown string per slide) or get a single title slide.",
+  "Create a Marp slide-deck note. Scaffolds a `.md` note whose frontmatter carries `marp: true`, with slides separated by `---`. Provide `slides` (one markdown string per slide) or get a single title slide. Before calling it, call list_marp_themes and ASK THE USER which theme to use (offer the server's central themes first). When the server has central themes, `theme` is required and must be one of the listed themes.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path for the new deck (\".md\" appended if missing)"),
     title: z.string().optional().describe("Title for the default first slide (used when `slides` is omitted)"),
-    theme: z.string().optional().describe("Marp theme (default: default)"),
+    theme: z.string().optional().describe("Marp theme chosen by the user, from list_marp_themes. Required when the server has central themes; otherwise defaults to `default`"),
     paginate: z.boolean().optional().describe("Show slide numbers (default: true)"),
     class: z.string().optional().describe("Slide class(es) for every slide, space-separated, as the theme defines them (e.g. \"invert\")"),
     size: z.enum(["16:9", "4:3"]).optional().describe("Slide size (default: 16:9)"),
@@ -1682,6 +1739,18 @@ if (features.marp) server.tool(
     try {
       let notePath = path;
       if (!notePath.endsWith(".md")) notePath += ".md";
+      // The deck's theme is the user's choice: with a central catalog, refuse
+      // to guess, and refuse a name Marp would silently replace with `default`.
+      const choices = await marpThemeChoices();
+      if (choices.catalog) {
+        const known = [...choices.catalog.map((t) => t.name), ...choices.builtin.map((t) => t.name)];
+        if (theme === undefined && choices.catalog.length) {
+          return marpErr(`Ask the user which theme to use for this deck, then call create_marp again with \`theme\`. Nothing was created.\n${describeThemes(choices)}`);
+        }
+        if (theme !== undefined && !known.includes(theme)) {
+          return marpErr(`Unknown theme "${theme}". Nothing was created. Ask the user to pick one of:\n${describeThemes(choices)}`);
+        }
+      }
       const content = buildMarpDeck({ title, theme, paginate: paginate !== false, slideClass, size, header, footer, slides });
       const res = await api(
         `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(notePath)}`,
@@ -1692,7 +1761,7 @@ if (features.marp) server.tool(
         return { content: [{ type: "text", text: `Error ${res.status}: ${t}` }], isError: true };
       }
       const data = await res.json().catch(() => ({}));
-      return { content: [{ type: "text", text: `Created deck ${notePath}\n${JSON.stringify(data)}` }] };
+      return { content: [{ type: "text", text: `Created deck ${notePath} (theme: ${theme || "default"})\n${JSON.stringify(data)}` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }

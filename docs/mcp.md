@@ -19,7 +19,7 @@ transports**:
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
 > `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
 > `edit_excalidraw_node`, `edit_excalidraw_edge`, `delete_excalidraw_element`,
-> `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
+> `list_marp_themes`, `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
 > `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`.
 >
 > The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
@@ -29,7 +29,10 @@ transports**:
 > `set_task_field` edits one field, `toggle_task` checks/unchecks, `move_task`
 > changes a task's column, `delete_task` removes it and `search_tasks` filters
 > across a namespace (or all of them). `create_excalidraw`, `create_marp` and
-> `add_marp_slide` scaffold drawing and slide-deck notes.
+> `add_marp_slide` scaffold drawing and slide-deck notes. A deck's theme is the
+> user's choice: `list_marp_themes` lists the server's central themes (Admin >
+> Marp Themes) and the built-in ones, and on a server with central themes
+> `create_marp` refuses to create a deck until it is given one of them.
 >
 > **Prefer `edit_note` over `read_note` + `write_note` for a partial change**
 > (v4.4.0+). It replaces an exact `old_string` with `new_string` and leaves the
@@ -294,7 +297,8 @@ these tools scaffold a valid file that the app then renders.
 | `edit_excalidraw_node` | Edit one shape by element id (label, shape kind, position, size, colours); connected arrows re-flow. | `namespace`, `path`, `id`, `text?`, `shape?`, `x?`, `y?`, `width?`, `height?`, `strokeColor?`, `backgroundColor?`, `fillStyle?` |
 | `edit_excalidraw_edge` | Edit one arrow by element id (label, dashed, arrowhead, colour). | `namespace`, `path`, `id`, `text?`, `dashed?`, `arrowhead?`, `strokeColor?` |
 | `delete_excalidraw_element` | Delete one element by id (a shape takes its label + connected arrows; an arrow takes its label). | `namespace`, `path`, `id` |
-| `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `class?`, `size?` (`16:9`/`4:3`), `header?`, `footer?`, `slides?` |
+| `list_marp_themes` | List the themes a deck can use: central themes (Admin > Marp Themes) first, then built-in ones, each with the slide classes it defines. | — |
+| `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). With central themes, `theme` is required and must be a listed theme (ask the user); an unknown theme is refused. | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `class?`, `size?` (`16:9`/`4:3`), `header?`, `footer?`, `slides?` |
 | `list_marp_slides` | List a deck's slides (1-based index, first line, length) + its frontmatter. | `namespace`, `path` |
 | `read_marp_slide` | Read one slide's markdown by index. | `namespace`, `path`, `index` |
 | `add_marp_slide` | Add a slide — appended, or inserted before a 1-based `index`. | `namespace`, `path`, `content`, `index?` |

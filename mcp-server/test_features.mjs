@@ -61,7 +61,7 @@ async function run() {
   // Gated OFF (chat absent from config): no chat tools offered against a
   // backend whose /api/chat* routes would 404.
   ok("chat tools hidden (chat off)", !names.some((n) => n.endsWith("_chat") || n === "list_chats"), names.filter((n) => n.includes("chat")).join(",") || "none");
-  ok("marp tools hidden (marp off)", !has("create_marp") && !has("add_marp_slide"), names.filter((n) => n.includes("marp")).join(",") || "none");
+  ok("marp tools hidden (marp off)", !has("create_marp") && !has("add_marp_slide") && !has("list_marp_themes"), names.filter((n) => n.includes("marp")).join(",") || "none");
 }
 
 // --- orchestrate ----------------------------------------------------------
