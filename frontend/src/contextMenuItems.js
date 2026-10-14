@@ -6,7 +6,7 @@
 // exist. Items now come in fixed groups, in this order, with Delete always
 // last and on its own:
 //
-//   create    New note / folder / drawing / chat, Paste here   (folder, root)
+//   create    New note / folder / drawing / slides / chat, Paste here (folder, root)
 //   organize  Rename, Move to…, Copy to…
 //   share     Download, Copy file contents, Copy path for CLI
 //   info      History, Authors                                  (files)
@@ -18,7 +18,7 @@
 // click, so change one only together with tests/browser.
 
 export function contextMenuGroups({
-  target, hasWrite = true, isAdmin = false, multi = false, excalidraw = false, chat = false,
+  target, hasWrite = true, isAdmin = false, multi = false, excalidraw = false, marp = false, chat = false,
 }) {
   const isFolder = !!target && (target.type === 'folder' || target.type === 'directory');
   const isFile = !!target && !isFolder && !!target.path;
@@ -30,6 +30,7 @@ export function contextMenuGroups({
     create.push({ label: 'New note', action: 'new-note', icon: 'note' });
     create.push({ label: 'New folder', action: 'new-folder', icon: 'folder' });
     if (excalidraw) create.push({ label: 'New drawing', action: 'new-drawing', icon: 'drawing' });
+    if (marp) create.push({ label: 'New slides', action: 'new-slides', icon: 'slides' });
     if (chat) create.push({ label: 'New chat', action: 'new-chat', icon: 'chat' });
     // A new note from the clipboard, e.g. one copied with "Copy file contents" on another server.
     create.push({ label: 'Paste here', action: 'paste-here', icon: 'paste' });

@@ -173,9 +173,21 @@ export function buildExcalidraw({ elements = [], files = {}, background = "#ffff
 
 // buildMarpDeck renders a Marp slide deck: YAML frontmatter carrying the
 // `marp: true` marker Marp detection keys on, followed by slides separated by a
-// blank-line-delimited `---`. Slides default to a single title slide.
-export function buildMarpDeck({ title = "Untitled deck", theme = "default", paginate = true, slides } = {}) {
-  const fm = ["---", "marp: true", `theme: ${theme}`, `paginate: ${paginate ? "true" : "false"}`, "---"];
+// blank-line-delimited `---`. Slides default to a single title slide. The
+// optional keys match what the app's "+ Slides" dialog writes
+// (frontend/src/newDeck.js); unset ones are left out.
+const MARP_IDENT = /^[A-Za-z_][\w-]*$/;
+const marpOneLine = (v) => String(v ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+export function buildMarpDeck({ title = "Untitled deck", theme = "default", paginate = true, slides, slideClass, size, header, footer } = {}) {
+  const fm = ["---", "marp: true", `theme: ${MARP_IDENT.test(theme) ? theme : "default"}`];
+  const classes = String(slideClass ?? "").split(/\s+/).filter((c) => MARP_IDENT.test(c));
+  if (classes.length) fm.push(`class: ${classes.join(" ")}`);
+  fm.push(`paginate: ${paginate ? "true" : "false"}`);
+  if (size === "4:3") fm.push("size: 4:3");
+  // JSON strings are valid YAML double-quoted scalars, so any text is safe.
+  if (marpOneLine(header)) fm.push(`header: ${JSON.stringify(marpOneLine(header))}`);
+  if (marpOneLine(footer)) fm.push(`footer: ${JSON.stringify(marpOneLine(footer))}`);
+  fm.push("---");
   const body = Array.isArray(slides) && slides.length
     ? slides.map((s) => String(s).trim())
     : [`# ${title}`];
@@ -1660,13 +1672,17 @@ if (features.marp) server.tool(
     title: z.string().optional().describe("Title for the default first slide (used when `slides` is omitted)"),
     theme: z.string().optional().describe("Marp theme (default: default)"),
     paginate: z.boolean().optional().describe("Show slide numbers (default: true)"),
+    class: z.string().optional().describe("Slide class(es) for every slide, space-separated, as the theme defines them (e.g. \"invert\")"),
+    size: z.enum(["16:9", "4:3"]).optional().describe("Slide size (default: 16:9)"),
+    header: z.string().optional().describe("Header text on every slide"),
+    footer: z.string().optional().describe("Footer text on every slide"),
     slides: z.array(z.string()).optional().describe("Markdown body of each slide, in order"),
   },
-  async ({ namespace, path, title, theme, paginate, slides }) => {
+  async ({ namespace, path, title, theme, paginate, class: slideClass, size, header, footer, slides }) => {
     try {
       let notePath = path;
       if (!notePath.endsWith(".md")) notePath += ".md";
-      const content = buildMarpDeck({ title, theme, paginate: paginate !== false, slides });
+      const content = buildMarpDeck({ title, theme, paginate: paginate !== false, slideClass, size, header, footer, slides });
       const res = await api(
         `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(notePath)}`,
         { method: "POST", body: content }

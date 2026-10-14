@@ -39,5 +39,14 @@ const [moved] = s.splice(0, 1); s.push(moved); // move slide 1 to the end
 const final = splitMarp(joinMarp(frontmatter, s)).slides;
 ok("move reorders", final[final.length - 1] === "# Edited");
 
+// The optional front matter keys, as the app's "+ Slides" dialog writes them.
+const plain = buildMarpDeck({ title: "T" });
+ok("plain deck keeps the short front matter", plain === "---\nmarp: true\ntheme: default\npaginate: true\n---\n\n# T\n", JSON.stringify(plain));
+const full = buildMarpDeck({ theme: "gaia", slideClass: "invert lead", size: "4:3", header: 'Team: "A" #1', footer: "x\ny", title: "T" });
+ok("class, size, header and footer are written", full.includes('theme: gaia\nclass: invert lead\npaginate: true\nsize: 4:3\nheader: "Team: \\"A\\" #1"\nfooter: "x y"\n---'), JSON.stringify(full));
+ok("16:9 is the default and not written", !buildMarpDeck({ size: "16:9" }).includes("size:"));
+const evil = buildMarpDeck({ theme: "x\nmarp: false", slideClass: "ok a:b" });
+ok("a theme or class cannot break the front matter", evil.includes("theme: default\nclass: ok\n") && !evil.includes("marp: false"), JSON.stringify(evil));
+
 console.log(`\n${failed === 0 ? "ALL PASS" : "FAILURES"}: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

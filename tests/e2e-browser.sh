@@ -78,6 +78,7 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e FRONTEND_ORIGIN=http://localhost \
   -e ENABLE_TASK_BOARD=true \
   -e ENABLE_EXCALIDRAW=true \
+  -e ENABLE_MARP=true \
   -e ENABLE_LIVE_COLLAB=true \
   -e ENABLE_AGENT_APPROVALS=true \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null

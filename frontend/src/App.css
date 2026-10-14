@@ -2958,18 +2958,22 @@ pre:hover .code-copy-btn {
 /* ===== Sidebar action buttons ===== */
 .sidebar-actions {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .sidebar-action-btn {
-  flex: 1;
+  /* Sized to the label so four buttons fit one row, and wrap to a second
+     row in a narrow sidebar instead of breaking a label in two. */
+  flex: 1 1 auto;
+  white-space: nowrap;
   background: var(--surface-2);
   color: var(--text);
   border: none;
-  padding: 5px 0;
+  padding: 5px 4px;
   border-radius: 5px;
   cursor: pointer;
   font-size: 0.8rem;
@@ -7075,4 +7079,52 @@ pre:hover .code-copy-btn {
   color: var(--text-secondary);
   padding: 2px 8px;
   cursor: pointer;
+}
+
+/* "+ Slides": new Marp deck dialog. */
+.newdeck-modal { display: flex; flex-direction: column; }
+.newdeck-where {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: -0.5rem 0 0.6rem;
+  overflow-wrap: anywhere;
+}
+.newdeck-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 0.75rem;
+}
+.newdeck-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.newdeck-wide { grid-column: 1 / -1; }
+.newdeck-classes { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; }
+.newdeck-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.newdeck-preview {
+  height: 220px;
+  margin-top: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.newdeck-preview .marp-deck-stage { padding: 0.5rem; }
+/* Sized by the height here: the box is short and wide, so a frame as wide
+   as the box would crop the slide. */
+.newdeck-preview .marp-deck-frame { height: 100%; width: auto; max-width: 100%; }
+@media (max-width: 560px) {
+  .newdeck-grid { grid-template-columns: 1fr; }
+  .newdeck-preview { height: 180px; }
 }

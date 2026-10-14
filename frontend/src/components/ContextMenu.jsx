@@ -7,6 +7,7 @@ const ICONS = {
   note: <><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M12 12v6M9 15h6"/></>,
   folder: <><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M12 10v6M9 13h6"/></>,
   drawing: <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></>,
+  slides: <><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M12 16v4M8 20h8"/></>,
   chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>,
   paste: <><rect x="6" y="4" width="12" height="17" rx="1.5"/><path d="M9 4V3h6v1M12 10v6M9.5 13.5 12 16l2.5-2.5"/></>,
   rename: <><path d="M4 7V5h11v2M9.5 5v14M7 19h5"/><path d="M17 10v9M15 10h4M15 19h4"/></>,
@@ -24,7 +25,7 @@ const ICONS = {
 
 // `groups` and `title` let another surface (the chat list) reuse the menu
 // with its own items; without them it is the tree's menu for `target`.
-function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, multi, selectedNs, excalidraw, chat, groups: groupsProp, title: titleProp }) {
+function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, multi, selectedNs, excalidraw, marp, chat, groups: groupsProp, title: titleProp }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -79,7 +80,7 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
   // Check write permission for the target path
   const targetPath = target?.path || '';
   const hasWrite = !canWrite || canWrite(targetPath);
-  const groups = groupsProp || contextMenuGroups({ target, hasWrite, isAdmin, multi, excalidraw, chat });
+  const groups = groupsProp || contextMenuGroups({ target, hasWrite, isAdmin, multi, excalidraw, marp, chat });
   if (groups.length === 0) return null;
 
   // The clicked item's name heads the menu, so it is clear what Rename or

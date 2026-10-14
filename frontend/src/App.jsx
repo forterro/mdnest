@@ -44,6 +44,7 @@ import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
 import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
+import NewDeckModal from './components/NewDeckModal.jsx';
 import PasteModal from './components/PasteModal.jsx';
 import { copyPlainText } from './mermaid-text.js';
 import EmptyNamespaces from './components/EmptyNamespaces';
@@ -491,6 +492,8 @@ function App() {
   // false on tree rows) and is also available from the context menu on
   // desktop as a more accessible alternative to dragging.
   const [moveModal, setMoveModal] = useState(null);
+  // "+ Slides" dialog: {ns, dir} while open.
+  const [newDeck, setNewDeck] = useState(null);
   // "Paste here" target: {ns, folder}.
   const [pasteModal, setPasteModal] = useState(null);
   // One status line at the bottom for downloads and clipboard copies:
@@ -1735,6 +1738,12 @@ function App() {
     }
   }, [selectedNs, getTargetDir, refreshTree, openNote]);
 
+  // A new Marp deck goes through a dialog (theme, styles, outline, preview).
+  const doCreateSlides = useCallback((target) => {
+    if (!selectedNs) return;
+    setNewDeck({ ns: selectedNs, dir: getTargetDir(target) });
+  }, [selectedNs, getTargetDir]);
+
   const doCreateFolder = useCallback(async (target) => {
     if (!selectedNs) return;
     const name = prompt('Folder name:');
@@ -1840,6 +1849,7 @@ function App() {
     switch (action) {
       case 'new-note': await doCreateNote(target); break;
       case 'new-drawing': await doCreateDrawing(target); break;
+      case 'new-slides': doCreateSlides(target); break;
       case 'new-folder': await doCreateFolder(target); break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
@@ -1986,7 +1996,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateSlides, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -2212,6 +2222,7 @@ function App() {
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
+        onNewSlides={marpEnabled && canWrite('') ? () => doCreateSlides(null) : null}
         pickedFolder={pickedFolder}
         onPickFolder={setPickedFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
@@ -2622,6 +2633,18 @@ function App() {
           onClose={() => setAttributionModal(null)}
         />
       )}
+      {newDeck && (
+        <NewDeckModal
+          namespace={newDeck.ns}
+          dir={newDeck.dir}
+          onClose={() => setNewDeck(null)}
+          onCreated={async (path) => {
+            setNewDeck(null);
+            await refreshTree(undefined, { broadcast: true });
+            openNote(path);
+          }}
+        />
+      )}
       {moveModal && (
         <MoveToModal
           mode={moveModal.mode}
@@ -2694,6 +2717,7 @@ function App() {
         multi={isMulti}
         selectedNs={selectedNs}
         excalidraw={excalidrawEnabled}
+        marp={marpEnabled}
         chat={chatEnabled}
       />
       {showApprovals && approvalsEnabled && (

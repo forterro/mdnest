@@ -26,7 +26,7 @@ export function clearMarpThemeCache() {
   themePromise = null;
 }
 
-function loadThemes() {
+export function loadThemes() {
   if (themeCache) return Promise.resolve(themeCache);
   if (!themePromise) {
     themePromise = getMarpThemes()
@@ -34,6 +34,13 @@ function loadThemes() {
       .catch(() => { themeCache = []; return themeCache; });
   }
   return themePromise;
+}
+
+// builtinThemeCss returns the stylesheet of each of Marp's built-in themes,
+// by name. The new-deck dialog reads the slide classes each theme defines.
+export function builtinThemeCss(names) {
+  const set = new Marp().themeSet;
+  return Object.fromEntries(names.map((n) => [n, set.get(n)?.css || '']));
 }
 
 // render turns the note into per-slide HTML fragments + the theme CSS. The
@@ -59,7 +66,8 @@ function render(content, themes) {
 // mapping off. Instead we anchor to where slides *actually* begin;
 // see marp.js for the exact rules.
 
-export default function MarpDeck({ content, scrollPct, title }) {
+// exportable: false hides the HTML export (the new-deck preview has no note yet).
+export default function MarpDeck({ content, scrollPct, title, exportable = true }) {
   // Centralized themes load asynchronously; until then we render with the
   // built-in themes only (a deck that selects a custom theme falls back to
   // `default` for one frame, then re-renders once the catalog arrives).
@@ -144,7 +152,9 @@ export default function MarpDeck({ content, scrollPct, title }) {
     return `<!doctype html><html><head><meta charset="utf-8">`
       + `<style>${css}\nhtml,body{margin:0;height:100%}`
       + `body{display:flex;align-items:center;justify-content:center;background:#0b0b12}`
-      + `.marpit{width:100%;max-height:100%}svg[data-marpit-svg]{display:block;width:100%;height:auto}</style>`
+      // The frame is 16:9; the slide's SVG fills it and keeps its own ratio
+      // (preserveAspectRatio), so a 4:3 deck is letterboxed, not cropped.
+      + `.marpit{width:100%;height:100%}svg[data-marpit-svg]{display:block;width:100%;height:100%}</style>`
       + `</head><body><div class="marpit">${slides[idx]}</div></body></html>`;
   }, [slides, css, idx, total]);
 
@@ -166,7 +176,7 @@ export default function MarpDeck({ content, scrollPct, title }) {
         <button type="button" onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous slide">‹</button>
         <span className="marp-deck-counter">{idx + 1} / {total}</span>
         <button type="button" onClick={() => go(1)} disabled={idx === total - 1} aria-label="Next slide">›</button>
-        <button type="button" className="marp-deck-export" onClick={() => doExport()} disabled={!!exporting} title="Export as a standalone Marp presentation (navigation, fullscreen, presenter)">{exporting ? '…' : 'HTML'}</button>
+        {exportable && <button type="button" className="marp-deck-export" onClick={() => doExport()} disabled={!!exporting} title="Export as a standalone Marp presentation (navigation, fullscreen, presenter)">{exporting ? '…' : 'HTML'}</button>}
         <button type="button" className="marp-deck-fs" onClick={toggleFullscreen} aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>

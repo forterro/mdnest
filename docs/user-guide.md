@@ -133,6 +133,7 @@ At the top of the sidebar:
 - **+ Folder** -- creates a new folder. You will be prompted for a name.
 - **+ Note** -- creates a new markdown file. You will be prompted for a filename.
 - **+ Drawing** -- creates a new `.excalidraw.md` drawing (when drawings are enabled).
+- **+ Slides** -- creates a new Marp slide deck (when slides are enabled). A dialog asks for the name and title, then sets up the deck: the theme (Marp's built-in ones and the themes of **Admin > Marp Themes**), the style of the title slide and of every slide (the classes the theme defines, such as `lead` or `invert`), the size (16:9 or 4:3), slide numbers, a header and a footer, and how many content slides to start with. A live preview shows the deck before you create it.
 
 **Where new items are created** *(clarified in v4.2.1)*: click a folder in the
 tree to aim these buttons at it — the folder is highlighted, and each button's
@@ -146,7 +147,7 @@ selected.
 
 Right-click (desktop) or long-press (mobile) on a file or folder in the tree. The menu shows the item's name at the top, then its actions in groups, always in the same order:
 
-- **New note / New folder / New drawing / New chat, Paste here** (folders and the namespace root) -- create inside that folder. **Paste here** makes a new note from the text on your clipboard, such as a note copied with "Copy file contents" on another mdnest.
+- **New note / New folder / New drawing / New slides / New chat, Paste here** (folders and the namespace root) -- create inside that folder. **Paste here** makes a new note from the text on your clipboard, such as a note copied with "Copy file contents" on another mdnest.
 - **Rename, Move to…, Copy to…** -- renaming a file without an extension keeps the original one (`notes.md` renamed to `summary` becomes `summary.md`). **Move to…** and **Copy to…** open one picker for a namespace, a folder and a name; it is touch-friendly, which matters on mobile, where drag-and-drop is off.
 - **Download** (a file) or **Download as zip** (a folder, keeping its folders), **Copy file contents** (notes, as plain text), **Copy path for CLI** (an `mdnest://` address the CLI and agents accept)
 - **History** and, in multi-user mode, **Authors** (files)
@@ -438,7 +439,8 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 > Slides: a note whose frontmatter declares `marp: true` renders as a
 > [Marp](https://marp.app/) slide deck in the Preview pane — the same note you
 > drafted the idea in is the deck you present from. Also opt-in
-> (`ENABLE_MARP=true`); notes without `marp: true` are unaffected.
+> (`ENABLE_MARP=true`); notes without `marp: true` are unaffected. **+ Slides**
+> in the sidebar creates a deck with its theme, styles and outline already set.
 
 > Drawings: a `.excalidraw.md` note opens on a full Excalidraw canvas, and any
 > note can embed one read-only with `![alt](path.excalidraw.md)`. Opt-in

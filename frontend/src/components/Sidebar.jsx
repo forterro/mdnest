@@ -88,6 +88,7 @@ function Sidebar({
   onAdminPanel,
   onNewNote,
   onNewDrawing,
+  onNewSlides,
   onNewFolder,
   pickedFolder,
   onPickFolder,
@@ -480,11 +481,12 @@ function Sidebar({
         </div>
         {(onNewNote || onNewFolder) && (
           <div className="sidebar-actions">
-            {/* Folder, then Note, then Drawing: containers before the things
-                that go in them, and the two file kinds adjacent. */}
+            {/* Folder, then Note, Drawing and Slides: containers before the
+                things that go in them, and the file kinds adjacent. */}
             {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder} title={`New folder ${createHint}`}>+ Folder</button>}
             {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote} title={`New note ${createHint}`}>+ Note</button>}
             {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing} title={`New drawing ${createHint}`}>+ Drawing</button>}
+            {onNewSlides && <button className="sidebar-action-btn" onClick={onNewSlides} title={`New slides ${createHint}`}>+ Slides</button>}
           </div>
         )}
 

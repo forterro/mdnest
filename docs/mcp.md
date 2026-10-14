@@ -294,7 +294,7 @@ these tools scaffold a valid file that the app then renders.
 | `edit_excalidraw_node` | Edit one shape by element id (label, shape kind, position, size, colours); connected arrows re-flow. | `namespace`, `path`, `id`, `text?`, `shape?`, `x?`, `y?`, `width?`, `height?`, `strokeColor?`, `backgroundColor?`, `fillStyle?` |
 | `edit_excalidraw_edge` | Edit one arrow by element id (label, dashed, arrowhead, colour). | `namespace`, `path`, `id`, `text?`, `dashed?`, `arrowhead?`, `strokeColor?` |
 | `delete_excalidraw_element` | Delete one element by id (a shape takes its label + connected arrows; an arrow takes its label). | `namespace`, `path`, `id` |
-| `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `slides?` |
+| `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `class?`, `size?` (`16:9`/`4:3`), `header?`, `footer?`, `slides?` |
 | `list_marp_slides` | List a deck's slides (1-based index, first line, length) + its frontmatter. | `namespace`, `path` |
 | `read_marp_slide` | Read one slide's markdown by index. | `namespace`, `path`, `index` |
 | `add_marp_slide` | Add a slide — appended, or inserted before a 1-based `index`. | `namespace`, `path`, `content`, `index?` |
