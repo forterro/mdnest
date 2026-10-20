@@ -69,7 +69,7 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-collab-secret \
   -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
-  -e ENABLE_LIVE_COLLAB=true -e ENABLE_AGENT_APPROVALS=true "${EXTRA_ENV[@]}" \
+  -e ENABLE_LIVE_COLLAB=true -e ENABLE_AGENT_APPROVALS=true ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 docker run -d --name "$FE" --network "$NET" -p 127.0.0.1:0:80 "$FE_IMAGE" >/dev/null
 PORT="$(docker port "$FE" 80/tcp | head -1 | sed 's/.*://')"
