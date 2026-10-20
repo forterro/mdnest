@@ -4,7 +4,13 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.11 (in progress)
+## v4.8.11: HA installs no longer fill Redis, and CLI changes show live again
+
+A fix release. On the Kubernetes HA topology (app replicas and one writer),
+Redis could fill up and stop every save, and the writer did not recover
+until it was restarted. Upgrading is strongly recommended for HA installs.
+It also fixes text added from the CLI not showing in an open note until a
+reload, a regression in 4.8.10.
 
 ### Fixed
 
