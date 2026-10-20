@@ -44,10 +44,17 @@ command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { fail "dock
 command -v node >/dev/null 2>&1 || { fail "node is required for Playwright"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { fail "python3 is required"; exit 2; }
 
-log "Building backend + frontend images from the working tree"
-docker build -t "$BE_IMAGE" backend/ >/tmp/mdnest-e2e-collab-be.log 2>&1 \
+# MDNEST_BUILD_ROOT builds the app from another checkout (an older release
+# in a throwaway worktree, say) while the specs, the CLI and this script stay
+# the current ones. MDNEST_E2E_BACKEND_ENV adds backend settings, for example
+# "SHARED_EDITING=false".
+BUILD_ROOT="${MDNEST_BUILD_ROOT:-$REPO_ROOT}"
+EXTRA_ENV=()
+for kv in ${MDNEST_E2E_BACKEND_ENV:-}; do EXTRA_ENV+=(-e "$kv"); done
+log "Building backend + frontend images from $BUILD_ROOT"
+docker build -t "$BE_IMAGE" "$BUILD_ROOT/backend/" >/tmp/mdnest-e2e-collab-be.log 2>&1 \
   || { fail "backend build failed"; tail -30 /tmp/mdnest-e2e-collab-be.log; exit 1; }
-docker build --build-context cli=. -t "$FE_IMAGE" frontend/ >/tmp/mdnest-e2e-collab-fe.log 2>&1 \
+docker build --build-context cli="$BUILD_ROOT" -t "$FE_IMAGE" "$BUILD_ROOT/frontend/" >/tmp/mdnest-e2e-collab-fe.log 2>&1 \
   || { fail "frontend build failed"; tail -30 /tmp/mdnest-e2e-collab-fe.log; exit 1; }
 pass "images built"
 
@@ -62,13 +69,13 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-collab-secret \
   -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
-  -e ENABLE_LIVE_COLLAB=true \
+  -e ENABLE_LIVE_COLLAB=true -e ENABLE_AGENT_APPROVALS=true "${EXTRA_ENV[@]}" \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 docker run -d --name "$FE" --network "$NET" -p 127.0.0.1:0:80 "$FE_IMAGE" >/dev/null
 PORT="$(docker port "$FE" 80/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS "$BASE/api/config" | grep -q '"liveCollab":true' \
+curl -fsS "$BASE/api/config" | tr -d ' ' | grep -q '"liveCollab":true' \
   || { fail "stack not healthy or live collab off"; docker logs "$BE" | tail -30; exit 1; }
 pass "multi-mode stack with live collab at $BASE"
 

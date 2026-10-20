@@ -189,5 +189,9 @@ always sent.
   `append`, `prepend` and `edit` show live in a shared note and in Basic mode,
   a git-sync style write to disk shows within the saver's check, and CLI
   changes made while someone types are merged, not written over.
+  `collab-idle.spec.js` leaves a note open for a minute and fails on any
+  remount, change inside the editor or reconnect. `cli-vs-typing.spec.js`
+  has one person typing past the 60-second poll while the CLI appends, and
+  fails if the CLI's line is not on disk.
 - `frontend/src/__tests__/sharedText.test.js`: front matter split and join, the
   three-way merge, the message format.
