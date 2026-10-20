@@ -8,6 +8,20 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **HA installs: Redis no longer fills up, and the writer recovers on its
+  own** (GitHub issue #147). In the Kubernetes topology with app replicas and
+  one writer, every save is handed to the writer through a Redis stream. Two
+  bugs together caused a full write outage. First, applied entries were never
+  removed from the stream, and each one carries the whole note, so a busy
+  chat filled Redis until it refused every save ("failed to write chat").
+  Now the writer deletes each entry as soon as it is applied, and on its
+  first start after the upgrade it clears the entries an older version left
+  behind. Second, a writer that lost its leader lock stopped applying saves
+  but kept running and stayed Ready, until someone restarted the pod. Now it
+  campaigns for the lock again with a backoff, logs why it lost it, and no
+  longer applies anything once the lock is gone. Single-box installs are not
+  affected.
+
 - **A note changed with the CLI updates live again in the browser.** Since
   shared editing, text added with `mdnest append` or `mdnest prepend` (or an
   agent's append) only showed after a reload. The server never announced
