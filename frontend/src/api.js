@@ -998,6 +998,19 @@ export async function adminListGroups() {
   return res.json();
 }
 
+// Everyone's API tokens with their owner (superadmin). Settings lists only your own.
+export async function adminListTokens() {
+  const res = await request('/admin/tokens');
+  if (!res.ok) throw new Error('Failed to list API tokens');
+  return res.json();
+}
+
+export async function adminRevokeToken(id) {
+  const res = await request(`/admin/tokens?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to revoke the token');
+  return res.json();
+}
+
 export async function adminCreateGroup(name, description) {
   const res = await request('/admin/groups', {
     method: 'POST',

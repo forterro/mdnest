@@ -83,6 +83,10 @@ The panel has three tabs for access, and each answers one question:
 
 Access from an IdP (OIDC) group is read from the sign-in token, so it is not part of **Can reach**.
 
+**API Tokens** (super-admins): every person's API tokens, with the owner, so you can see who connects
+CLI, MCP or API clients and **Revoke** a token someone no longer needs. Your own tokens stay in
+Settings → **API Tokens**, which only ever lists yours.
+
 ### Adding a person
 
 Admin panel → **People** → **+ Add person**:

@@ -2526,6 +2526,11 @@ pre:hover .code-copy-btn {
   color: var(--text);
 }
 
+.token-owner {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 .token-hint {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
