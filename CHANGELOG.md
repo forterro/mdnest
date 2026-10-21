@@ -6,6 +6,17 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.12 (in progress)
 
+### Release process
+
+- **A release gate that runs before the push.** `bash tests/release-gate.sh`
+  runs every suite a release needs, including Go tests against a real Redis
+  and the end-to-end suites the changed files call for (HA, shared editing,
+  private chats, move and copy), and records the exact code it tested. The
+  pre-push hook accepts a push to `main` or a `release/*` branch only for that
+  code. The hook now also builds and vets the backend and runs shellcheck
+  through Docker when Go or shellcheck are not installed, instead of skipping
+  them. `main` requires the CI test jobs as well as the security checks.
+
 ### Security
 
 - **Go 1.26.10.** The backend is built with Go 1.26.10, which fixes
