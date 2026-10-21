@@ -4,6 +4,20 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.12 (in progress)
+
+### Security
+
+- **Go 1.26.10.** The backend is built with Go 1.26.10, which fixes
+  GO-2026-6809 (`crypto/x509` did not distrust compromised intermediate
+  certificates). v4.8.11 and earlier are built with 1.26.9.
+- **`markdown-it` 14.3.3**, used to render slide decks in the browser. 14.3.2
+  could take quadratic time on one long link reference definition
+  (GHSA-gfr2-rv44-r23c), so a crafted note opened as a deck could freeze the
+  tab of whoever opened it.
+- **`vite` 6.4.5**, the build tool (not shipped to browsers), for advisories
+  in its `launch-editor` dependency. Both are lock-file-only patch bumps.
+
 ## v4.8.11: HA installs no longer fill Redis, and CLI changes show live again
 
 A fix release. On the Kubernetes HA topology (app replicas and one writer),
