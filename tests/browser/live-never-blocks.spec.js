@@ -506,3 +506,119 @@ test('a room seeded from the live editor holds exactly the markdown, for the oth
     await a.close(); await b.close();
   }
 });
+
+// Everyone's socket drops at once, everyone types while apart, everyone
+// comes back. Nobody in the room was saving when they came back, and each
+// tab has text of its own, so each joins only once the room holds its text;
+// the room must get there by itself, within a bounded time after typing
+// stops, with every word once on disk and the same text on both screens.
+for (const variant of ['pauses', 'nonstop']) {
+  test(`(h) every socket drops and everyone comes back with text of their own (${variant})`, async ({ browser }) => {
+    test.setTimeout(240_000);
+    if (!USER2) test.skip(true, 'needs MDNEST_USER2 (tests/e2e-collab-multi.sh)');
+    const a = await browser.newContext();
+    const b = await browser.newContext();
+    const pageA = await a.newPage();
+    const pageB = await b.newPage();
+    const sockA = await cuttableSocket(pageA);
+    const sockB = await cuttableSocket(pageB);
+    await login(pageA, USER, PASS);
+    await login(pageB, USER2, PASS2);
+    const file = `lnb-h-${variant}-${Date.now()}.md`;
+    await makeNote(pageB, file, '# All apart\n\nline for alice\n\nline for bob\n');
+    const bound = (p) => p.locator('.editor-wrapper[data-shared=bound]');
+    const live = async (p) => /^Live/.test((await p.locator('.ws-status').textContent()) || '');
+    try {
+      expect(await openAndTime(pageB, file, 'line for bob')).toBeGreaterThanOrEqual(0);
+      await expect(bound(pageB)).toHaveCount(1, { timeout: 15_000 });
+      expect(await openAndTime(pageA, file, 'line for alice')).toBeGreaterThanOrEqual(0);
+      await expect(bound(pageA)).toHaveCount(1, { timeout: 15_000 });
+      const words = [];
+      // Each tab remembers the words it has finished typing, so a sampler
+      // in the page can check none of them ever leaves its screen.
+      const say = async (p, w) => {
+        words.push(w);
+        await p.keyboard.type(` ${w}`, { delay: 15 });
+        await p.evaluate((x) => { (window.__typed = window.__typed || []).push(x); }, w);
+      };
+      const sample = (p) => p.evaluate((sel) => {
+        window.__gone = [];
+        window.__samples = 0;
+        window.__sampler = setInterval(() => {
+          const el = document.querySelector(sel);
+          if (!el) return;
+          const c = el.cloneNode(true);
+          c.querySelectorAll('.ProseMirror-yjs-cursor').forEach((n) => n.remove());
+          const text = c.textContent || '';
+          window.__samples += 1;
+          for (const w of window.__typed || []) {
+            if (!text.includes(w)) {
+              if (!window.__gone.length) window.__goneText = text.slice(-160);
+              window.__gone.push(`${w} missing (${document.querySelector('.editor-wrapper')?.dataset.shared})`);
+            }
+          }
+        }, 50);
+      }, EDITOR);
+      const sampled = (p) => p.evaluate(() => { clearInterval(window.__sampler); return { gone: [...new Set(window.__gone)], samples: window.__samples, text: window.__goneText }; });
+
+      // Text in the room that nobody has saved yet when the sockets go, so
+      // the server keeps the room (with no saver) for its grace period.
+      await typeAfter(pageA, 'line for alice', '');
+      await typeAfter(pageB, 'line for bob', '');
+      await say(pageA, 'roomA');
+      await say(pageB, 'roomB');
+      sockA.cut();
+      sockB.cut();
+      await expect(pageA.locator('.ws-status')).toContainText('Not live', { timeout: 10_000 });
+      // Apart: both type, and both save the normal way.
+      await say(pageA, 'apartA1');
+      await say(pageB, 'apartB1');
+      await pageA.waitForTimeout(1500);
+      await say(pageA, 'apartA2');
+      await say(pageB, 'apartB2');
+      await sample(pageA);
+      await sample(pageB);
+      sockA.restore();
+      sockB.restore();
+
+      // Both keep typing while they reconnect.
+      let i = 0;
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline && !((await live(pageA)) && (await live(pageB)))) {
+        await say(pageA, `backA${i}`);
+        await say(pageB, `backB${i}`);
+        i += 1;
+        await pageA.waitForTimeout(variant === 'nonstop' ? 100 : 900);
+      }
+      expect((await live(pageA)) && (await live(pageB)), 'never reconnected').toBe(true);
+      if (variant === 'nonstop') {
+        // A types without a pause for 8 s after reconnecting.
+        const until = Date.now() + 8000;
+        let k = 0;
+        while (Date.now() < until) { await say(pageA, `cont${k}`); k += 1; }
+      }
+      const stopped = Date.now();
+
+      await expect(bound(pageA), 'A never joined the room').toHaveCount(1, { timeout: 10_000 });
+      await expect(bound(pageB), 'B never joined the room').toHaveCount(1, { timeout: Math.max(1000, 10_000 - (Date.now() - stopped)) });
+      console.log(`RESULT (h ${variant}) both in the room ${Date.now() - stopped} ms after typing stopped`);
+      // Nothing a tab had typed ever left its screen while it joined.
+      for (const [who, p] of [['A', pageA], ['B', pageB]]) {
+        const { gone, samples, text } = await sampled(p);
+        console.log(`RESULT (h ${variant}) ${who}: ${samples} samples, ${gone.length} problems${gone.length ? ` first seen with: ${JSON.stringify(text)}` : ''}`);
+        expect(gone, `${who}: own words left the screen while joining`).toEqual([]);
+      }
+      await expect.poll(async () => {
+        const disk = await readNote(pageA, file);
+        return words.filter((w) => disk.split(new RegExp(`\\b${w}\\b`)).length - 1 !== 1);
+      }, { timeout: 15_000, message: 'words missing or doubled on disk' }).toEqual([]);
+      await expect.poll(() => noteText(pageB), { timeout: 10_000 }).toBe(await noteText(pageA));
+      // And they are together again: typing shows live.
+      await say(pageA, 'together');
+      await expect(pageB.locator(EDITOR)).toContainText('together', { timeout: 2000 });
+    } finally {
+      await api(pageB, 'DELETE', file);
+      await a.close(); await b.close();
+    }
+  });
+}

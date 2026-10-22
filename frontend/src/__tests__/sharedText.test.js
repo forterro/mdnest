@@ -116,3 +116,29 @@ describe('mergeThreeWay report', () => {
     expect(mergeThreeWay(base, base, 'x\n')).toBe('x\n');
   });
 });
+
+// The same typing can reach the file twice: through the room and through a
+// tab's own save after its connection dropped, the later copy with more on
+// the same line. Keeping "both" printed the shared words twice.
+describe('mergeThreeWay: one side is the other plus more', () => {
+  const base = '# Note\n\nline for alice\n\nline for bob\n';
+  it('takes the longer side once, not both', () => {
+    const room = '# Note\n\nline for alice roomA\n\nline for bob roomB\n';
+    const file = '# Note\n\nline for alice roomA apartA1 apartA2\n\nline for bob roomB apartB1\n';
+    const report = {};
+    const out = mergeThreeWay(base, room, file, report);
+    expect(out).toBe(file);
+    expect(report.conflicts).toBe(0);
+    expect(mergeThreeWay(base, file, room)).toBe(file);
+  });
+  it('still merges other lines from the shorter side', () => {
+    const room = '# Note\n\nline for alice roomA\n\nline for bob\n\nadded by carol\n';
+    const file = '# Note\n\nline for alice roomA more\n\nline for bob\n';
+    expect(mergeThreeWay(base, room, file)).toBe('# Note\n\nline for alice roomA more\n\nline for bob\n\nadded by carol\n');
+  });
+  it('keeps both when each side removed something the other kept', () => {
+    const out = mergeThreeWay('a b c\n', 'a c mine\n', 'a b theirs\n');
+    expect(out).toContain('a c mine');
+    expect(out).toContain('a b theirs');
+  });
+});

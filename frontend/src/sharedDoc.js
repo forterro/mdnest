@@ -38,7 +38,7 @@
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab';
-import { undo as yUndo, redo as yRedo, prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
+import { undo as yUndo, redo as yRedo, prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode, updateYFragment } from 'y-prosemirror';
 import { prosePluginsCtx } from '@milkdown/core';
 import { saveNote, getNote, saveNoteOnLeave } from './api.js';
 import {
@@ -72,7 +72,8 @@ let nextId = 1;
 export class SharedSession {
   // prepare(): { base, etag }, the file as the app last loaded or saved it,
   // asked for at the moment the editor joins the room.
-  constructor({ client, ns, path, canWrite, user, onEvent, prepare }) {
+  // saveNow(): save the normal way now (a saver waiting to join, below).
+  constructor({ client, ns, path, canWrite, user, onEvent, prepare, saveNow }) {
     this.id = nextId++;
     // For LiveEditorCrepe, which must not import this chunk itself.
     this.collabPlugin = collab;
@@ -84,6 +85,7 @@ export class SharedSession {
     this.canWrite = !!canWrite;
     this.onEvent = onEvent || (() => {});
     this.prepare = prepare || (() => ({ base: '', etag: null }));
+    this.saveNow = saveNow || (() => {});
     // The file text this session started from (or that the room had saved
     // when the socket went). A tab still on it, with nothing typed, has
     // nothing the room lacks.
@@ -185,7 +187,8 @@ export class SharedSession {
     return joinFrontMatter(this.fm.toString(), this.editor.serialize());
   }
 
-  _maybeBind() {
+  // joined: set by _saverJoin, which already put the merged text in the room.
+  _maybeBind(joined = null) {
     if (this.bound || !this.editor || !this.ready || this.closed || this.disabled) return;
     const seeding = this.seed && this.fragment.length === 0;
     if (!seeding && this.fragment.length === 0) return; // wait for the seed
@@ -197,11 +200,17 @@ export class SharedSession {
     const ours = joinFrontMatter(oursFm, ed.serialize());
     const normBase = ed.normalize(base);
     const clean = ours === base || ours === normBase;
-    if (!seeding && !(clean && base === this.startBase)) {
+    if (!seeding && !joined && !(clean && base === this.startBase)) {
       // This tab has text of its own (typed, or saved the normal way while
       // apart from the room). It keeps saving the normal way, the room's
       // saver merges those saves from the file, and the editor joins once
-      // the room holds the same text, so nothing is merged twice.
+      // the room holds the same text, so nothing is merged twice. If this
+      // tab IS the saver (everyone was away, and it came back first), nobody
+      // else will merge the file: it does, before it joins.
+      if (this.saver && this.canWrite) {
+        this._saverJoin();
+        return;
+      }
       let room = null;
       try { room = joinFrontMatter(this.fm.toString(), ed.serializeNode(yXmlFragmentToProseMirrorRootNode(this.fragment, ed.schema()))); } catch { room = null; }
       if (room !== ours) {
@@ -260,6 +269,12 @@ export class SharedSession {
       }, META);
       if (clean) this._sendSaved(this.lastSeq, this.ownSent);
       else if (this.saver) this._scheduleSave(0);
+    } else if (joined) {
+      // The room now holds the file merged in: that file is what the room
+      // and the file agree on.
+      this.doc.transact(() => this._setAgreed(joined.etag, joined.text, joined.textMd, joined.dirty), META);
+      if (joined.dirty) this._scheduleSave(0);
+      else this._sendSaved(this.lastSeq, this.ownSent);
     }
     ed.setSelection(sel);
     this.onEvent({ type: 'bound' });
@@ -274,6 +289,63 @@ export class SharedSession {
     if (this.bound && this.saver && this.canWrite && !this.left && !this.dirty()) {
       this._sendSaved(this.lastSeq, this.ownSent);
     }
+  }
+
+  // The saver, apart, with text of its own. It joins at the first moment all
+  // of that text is saved: it reads the file, merges it with the room (the
+  // three-way merge every saver does with an outside change), writes the
+  // result into the room's document WITHOUT the editor (updateYFragment
+  // changes only what differs), and then binds. The room then already holds
+  // everything on screen, so binding takes nothing away from the person, and
+  // a keystroke cannot land on stale text: the editor is never bound to a
+  // room that lacks what it shows.
+  async _saverJoin() {
+    this._waitForRoom(); // checked again until it binds
+    if (this.joiningSaver) return;
+    const ed = this.editor;
+    const { base } = this.prepare();
+    const ours = joinFrontMatter(ed.frontMatter(), ed.serialize());
+    if (ours !== base && ours !== ed.normalize(base)) {
+      // Not all saved yet (typing, or a save on its way): save the normal
+      // way now and look again.
+      this.saveNow();
+      return;
+    }
+    this.joiningSaver = true;
+    let file = null;
+    try { file = await getNote(this.ns, this.path); } catch { file = null; }
+    this.joiningSaver = false;
+    if (!file || this.closed || this.bound || this.disabled || !this.saver || !this.ready || this.editor !== ed) return;
+    // Typed meanwhile, or another save landed: the next round.
+    if (joinFrontMatter(ed.frontMatter(), ed.serialize()) !== ours || this.prepare().base !== base) return;
+    let roomText;
+    try {
+      roomText = joinFrontMatter(this.fm.toString(), ed.serializeNode(yXmlFragmentToProseMirrorRootNode(this.fragment, ed.schema())));
+    } catch { return; }
+    const agreed = this.meta.get('hasBase') ? (this.meta.get('base') || '') : file.text;
+    const merged = mergeThreeWay(agreed, roomText, file.text);
+    // Usually the merge is exactly what is on screen (the file holds this
+    // tab's text and the room had nothing else); then the editor's own
+    // document goes in, and nothing moves at all.
+    const onScreen = merged === ours || ed.normalize(merged) === ours;
+    const split = splitFrontMatter(merged);
+    const node = onScreen ? ed.seedDoc() : ed.parseDoc(split.body);
+    if (!node) return;
+    const fmWant = onScreen ? ed.frontMatter() : split.frontMatter;
+    this.binding = true;
+    try {
+      this.doc.transact(() => {
+        if (this.fm.toString() !== fmWant) {
+          this.fm.delete(0, this.fm.length);
+          if (fmWant) this.fm.insert(0, fmWant);
+        }
+        updateYFragment(this.doc, this.fragment, node, { mapping: new Map(), isOMark: new Map() });
+      });
+    } finally {
+      this.binding = false;
+    }
+    const fileMd = ed.normalize(file.text);
+    this._maybeBind({ etag: file.etag, text: file.text, textMd: fileMd, dirty: merged !== file.text && merged !== fileMd });
   }
 
   // Check again shortly: the room and the editor converge through the file.

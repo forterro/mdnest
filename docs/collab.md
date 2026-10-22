@@ -62,7 +62,12 @@ ready, the editor joins it as it is at that moment:
 - if you have typed (or saved while away from the room), you keep saving the
   normal way. The room's saver merges those saves from the file like any
   outside change, and your editor joins the room as soon as the room holds the
-  same text as your editor. Nothing is merged twice.
+  same text as your editor. Nothing is merged twice;
+- if your tab is the room's saver (everyone was away, and you came back
+  first), nobody else would merge the file, so your tab does: at the first
+  moment all your text is saved, it merges the file into the room's document
+  and only then joins. The room already holds everything on your screen, so
+  joining takes nothing away and moves nothing.
 
 The caret and the keyboard stay where they were when the editor joins or
 leaves the room. If the connection drops while editing together, the editor
@@ -138,8 +143,11 @@ never goes through the server, such as a git-sync pull or an editor on the
 host, sends no message, so the saver also checks the file every 20 seconds.
 The merge is a line-based three-way merge of the text the room last saved,
 the room's text now, and the file. A part changed on one side takes that side, a part changed
-the same way on both sides is taken once, and a part changed differently on
-both keeps both versions, the room's first. The result is applied to the
+the same way on both sides is taken once, a part where one side is the other
+side plus more takes the longer one (the same typing often reaches the file
+twice, through the room and through a tab's own save when its connection
+dropped), and a part changed differently on both keeps both versions, the
+room's first. The result is applied to the
 editor as an ordinary edit, so it reaches everyone.
 
 ### Front matter

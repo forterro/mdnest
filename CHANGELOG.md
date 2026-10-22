@@ -67,7 +67,14 @@ All notable changes to mdnest are documented here.
     leaves only that note; the rest of their visit keeps its connection.
     The connection ends when the login it was opened with expires;
   - opening a note and leaving it straight away no longer leaves the server
-    holding "unsaved updates" for it.
+    holding "unsaved updates" for it;
+  - when everyone's connection drops and they come back with text of their
+    own, they all rejoin within a few seconds of stopping typing, with every
+    word once and nothing disappearing from anyone's screen.
+- **Merging two versions no longer prints shared words twice when one
+  version is the other plus more**, and a note open in another tab no
+  longer drops the last keystrokes typed just after a save when someone
+  else saves the same note.
 
 ### Tests
 

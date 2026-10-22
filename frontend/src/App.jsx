@@ -922,6 +922,9 @@ function App() {
   // pop a spurious self-conflict banner while autosave is mid-flight
   // (isClean=false), and on the clean path re-fetch and reset the editor
   // selection (the cursor "jumps").
+  // showOutside is defined further down; the file-changed handler reaches
+  // it through this ref.
+  const showOutsideRef = useRef(null);
   const handleFileChanged = useCallback((msg) => {
     if (echoGate.check(msg, etagRef.current) !== 'process') return;
     // Another user saved (or restored). Reload if this tab has no edits of
@@ -938,12 +941,20 @@ function App() {
       const ns = selectedNsRef.current;
       const path = currentPathRef.current;
       if (ns && path) {
-        getNote(ns, path).then(({ text, etag }) => {
+        getNote(ns, path).then(async ({ text, etag }) => {
+          if (selectedNsRef.current !== ns || currentPathRef.current !== path) return;
+          // Through the editor's own merge, like the note poll: "no local
+          // edits" is judged from the app's copy, which the Live editor
+          // reports late, so replacing the text outright dropped keystrokes
+          // typed just after a save (live-never-blocks.spec.js (h)).
+          const base = savedContentRef.current;
+          const { mergeThreeWay } = await import('./sharedText.js');
           if (selectedNsRef.current === ns && currentPathRef.current === path) {
-            setContent(text);
+            savedContentRef.current = text;
             setSavedContent(text);
             remoteLiveRef.current = null;
             etagRef.current = etag;
+            if (text !== base) showOutsideRef.current?.(base, text, mergeThreeWay);
             // Remount the drawing canvas so it shows the remote scene, not the
             // stale one it was mounted with.
             setDrawingReloadKey((k) => k + 1);
@@ -1156,6 +1167,8 @@ function App() {
       user: { id: userInfo?.id, name: userInfo?.username || 'someone', color: me?.color || '#89b4fa' },
       // The file as the normal path holds it, at the moment of binding.
       prepare: () => ({ base: savedContentRef.current || '', etag: etagRef.current }),
+      // A saver waiting to join saves what it has the normal way first.
+      saveNow: () => { flushPendingSave().catch(() => {}); },
       onEvent: (ev) => { if (sharedRef.current === session) handleSharedEvent(ev); },
     });
     sharedRef.current = session;
@@ -1937,6 +1950,7 @@ function App() {
       contentChangeRef.current?.(shown);
     }
   }, []);
+  showOutsideRef.current = showOutside;
   const mergeAndSave = useCallback(async (ns, path, base, ours, theirs) => {
     const { mergeThreeWay } = await import('./sharedText.js');
     for (let attempt = 0; attempt < 3; attempt += 1) {

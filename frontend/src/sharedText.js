@@ -14,8 +14,15 @@ export { splitFrontMatter, joinFrontMatter } from './frontMatter.js';
 // diff3: `base` is the text the room last saved or loaded, `ours` what the
 // room has now, `theirs` the file on disk. A part changed on one side takes
 // that side; a part changed the same way on both sides is taken once; a part
-// changed differently on both keeps both, ours first, so nobody's words are
-// dropped.
+// where one side is the other side plus more (only insertions between them)
+// takes the larger one, since keeping both would show the shared words twice;
+// a part changed differently on both keeps both, ours first, so nobody's
+// words are dropped.
+//
+// The "plus more" case is common: text typed in a shared note reaches the
+// file both through the room and through a tab's own save when its
+// connection dropped (sharedDoc.js), and the later copy has more typed on
+// the same line.
 
 function lineMatches(dmp, a, b) {
   // diff-match-patch's line mode: each line becomes one character, so the
@@ -48,6 +55,11 @@ function splitLines(s) {
 
 const sameLines = (x, y) => x.length === y.length && x.every((l, i) => l === y[i]);
 
+// Whether `more` is `less` with only insertions (character diff, no deletes).
+function onlyAdds(dmp, less, more) {
+  return dmp.diff_main(less, more, false).every(([op]) => op !== -1);
+}
+
 // report, when given, gets `conflicts`: how many places both sides changed
 // the same lines differently, so both versions were kept.
 export function mergeThreeWay(base, ours, theirs, report) {
@@ -78,6 +90,8 @@ export function mergeThreeWay(base, ours, theirs, report) {
     if (sameLines(a, b)) out.push(...c);
     else if (sameLines(a, c)) out.push(...b);
     else if (sameLines(b, c)) out.push(...b);
+    else if (onlyAdds(dmp, b.join(''), c.join(''))) out.push(...c);
+    else if (onlyAdds(dmp, c.join(''), b.join(''))) out.push(...b);
     else {
       if (report) report.conflicts += 1;
       out.push(...b);

@@ -773,6 +773,12 @@ export default function LiveEditorCrepe({
       // The document to seed an empty room with, without what only this
       // editor adds (generated heading ids): the room holds the note.
       seedDoc: () => withView((view) => view.state.schema.nodeFromJSON(stripBlockIds(view.state.doc.toJSON()))),
+      // A body parsed the way this editor would show it (for the saver
+      // joining with a merged text, see sharedDoc _saverJoin).
+      parseDoc: (body) => withView((view, ctx) => {
+        const doc = ctx.get(parserCtx)(body);
+        return doc && typeof doc !== 'string' ? view.state.schema.nodeFromJSON(stripBlockIds(doc.toJSON())) : null;
+      }),
       // The caret, and whether the person is typing here: joining the room
       // re-renders the whole document, which drops keyboard focus, and
       // whatever they type next would go nowhere.
