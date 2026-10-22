@@ -26,6 +26,9 @@ import (
 type Hub struct {
 	mu    sync.RWMutex
 	notes map[string]map[*Conn]struct{} // noteKey -> set of connections
+	// conns is every open connection, in a note or not, so a change of
+	// access can be checked against each one.
+	conns map[*Conn]struct{}
 
 	// id identifies this hub process; used to suppress self-echo of
 	// messages published to the backplane.
@@ -68,6 +71,7 @@ const (
 func NewHub() *Hub {
 	return &Hub{
 		notes:  make(map[string]map[*Conn]struct{}),
+		conns:  make(map[*Conn]struct{}),
 		id:     newInstanceID(),
 		bp:     nopBackplane{},
 		remote: make(map[string]map[string]remotePresence),
@@ -223,12 +227,13 @@ func (h *Hub) Leave(ns, path string, conn *Conn) {
 	}
 }
 
-// DropUsers closes every live connection on a note whose user keep rejects.
-// A connection is authorised once, when it joins, so this is how a change of
+// DropUsers takes every connection whose user keep rejects out of a note.
+// A connection is checked when it joins a note, so this is how a change of
 // access (someone removed from a private chat) reaches a tab that is already
-// open: its connection closes, and reconnecting goes through the check again.
+// in it: the connection leaves that note and its room (the rest of the visit
+// is untouched), the client is told, and joining again goes through the check.
 // Only this instance's connections: with the Redis backplane a peer keeps its
-// own until they reconnect.
+// own until they join again.
 func (h *Hub) DropUsers(ns, path string, keep func(userID int) bool) {
 	key := noteKey(ns, path)
 	h.mu.RLock()
@@ -240,7 +245,35 @@ func (h *Hub) DropUsers(ns, path string, keep func(userID int) bool) {
 	}
 	h.mu.RUnlock()
 	for _, c := range drop {
-		c.Close()
+		c.LeaveNote(h, ns, path, "access")
+	}
+}
+
+func (h *Hub) addConn(c *Conn) {
+	h.mu.Lock()
+	h.conns[c] = struct{}{}
+	h.mu.Unlock()
+}
+
+func (h *Hub) removeConn(c *Conn) {
+	h.mu.Lock()
+	delete(h.conns, c)
+	h.mu.Unlock()
+}
+
+// RecheckAccess runs every connection's note through its Authorize again,
+// after grants, groups or admins changed. A connection that may no longer
+// be there, or whose read-only state changed, leaves the note; the client
+// joins again and gets the access it has now.
+func (h *Hub) RecheckAccess() {
+	h.mu.RLock()
+	all := make([]*Conn, 0, len(h.conns))
+	for c := range h.conns {
+		all = append(all, c)
+	}
+	h.mu.RUnlock()
+	for _, c := range all {
+		c.recheck(h)
 	}
 }
 
@@ -363,6 +396,7 @@ func (h *Hub) BroadcastAccessChanged() {
 	}
 	h.localAll(data)
 	h.publish(wireMsg{Type: wireAll, Payload: data})
+	go h.RecheckAccess()
 }
 
 // localAll delivers data to every local conn on any note.
@@ -496,6 +530,10 @@ func (h *Hub) onRemote(m wireMsg) {
 		h.localNsPrefix(m.Ns, m.Payload)
 	case wireAll:
 		h.localAll(m.Payload)
+		var o OutgoingMessage
+		if json.Unmarshal(m.Payload, &o) == nil && o.Type == "access-changed" {
+			go h.RecheckAccess()
+		}
 	case wirePresence:
 		h.setRemotePresence(m.Key, m.Origin, m.Users)
 		// Re-emit the merged list to our local conns; do NOT publish here
