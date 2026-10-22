@@ -50,8 +50,9 @@ All notable changes to mdnest are documented here.
   could type, and every note switch closed the websocket and opened a new
   one, so the status flashed "Reconnecting". Now:
   - a note is editable as soon as it opens. Until the shared document is
-    there it saves the normal way, and when it arrives the editor joins it
-    without losing anything you typed (it is merged in for everyone);
+    there it saves the normal way, and the editor joins it without losing
+    anything you typed and without moving the caret or the keyboard (if you
+    already typed, it joins once the others have your text);
   - if the connection drops while you edit together, typing keeps working
     and saving, and the note joins the others again when it is back;
   - the browser keeps one websocket for the whole visit and switches notes

@@ -57,12 +57,18 @@ ready, the editor joins it as it is at that moment:
 
 - an empty room is filled from the editor's own document, so nothing on screen
   changes and the caret stays put;
-- a room that already has text replaces the editor's text, and anything typed
-  before is merged into it as an ordinary edit, so everyone gets it.
+- a room that already has text is joined at once when you have not changed
+  anything yet: you see the room's text, including what others are typing;
+- if you have typed (or saved while away from the room), you keep saving the
+  normal way. The room's saver merges those saves from the file like any
+  outside change, and your editor joins the room as soon as the room holds the
+  same text as your editor. Nothing is merged twice.
 
-If the connection drops while editing together, the editor leaves the room and
-goes back to saving the normal way, starting from what the room last saved;
-when the connection is back it joins the room again. The note is read-only
+The caret and the keyboard stay where they were when the editor joins or
+leaves the room. If the connection drops while editing together, the editor
+leaves the room and goes back to saving the normal way, starting from what the
+room last saved; when the connection is back it joins the room again, by the
+same rules. The note is read-only
 only for someone who may not write to it.
 
 ## Why it exists
