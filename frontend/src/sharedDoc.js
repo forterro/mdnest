@@ -97,6 +97,12 @@ export class SharedSession {
     this.ready = false;
     this.bound = false;
     this.closed = false;
+    // Bumped every time the session lets go of the editor (the socket went).
+    // Work that awaited something (a file check, a save, a saver's join)
+    // compares it after the await and stops if it changed: applying a file
+    // check that started while bound to an editor that is now saving the
+    // normal way put the file's old text over the person's typing.
+    this.gen = 0;
     this.disabled = false;
     this.editor = null;
     this.ownEtags = new Set();
@@ -312,10 +318,11 @@ export class SharedSession {
       return;
     }
     this.joiningSaver = true;
+    const gen = this.gen;
     let file = null;
     try { file = await getNote(this.ns, this.path); } catch { file = null; }
     this.joiningSaver = false;
-    if (!file || this.closed || this.bound || this.disabled || !this.saver || !this.ready || this.editor !== ed) return;
+    if (!file || this.closed || gen !== this.gen || this.bound || this.disabled || !this.saver || !this.ready || this.editor !== ed) return;
     // Typed meanwhile, or another save landed: the next round.
     if (joinFrontMatter(ed.frontMatter(), ed.serialize()) !== ours || this.prepare().base !== base) return;
     let roomText;
@@ -382,6 +389,7 @@ export class SharedSession {
   // room's document is dropped: the next join starts from a fresh one.
   _socketGone() {
     if (this.closed) return;
+    this.gen += 1;
     const wasBound = this.bound;
     let handover = null;
     if (wasBound) {
@@ -617,6 +625,7 @@ export class SharedSession {
     const md = this.fullMarkdown();
     if (md === null) return undefined;
     const recv = this.lastSeq;
+    const gen = this.gen;
     const own = this.ownSent;
     if (this._unchanged(md)) {
       this._sendSaved(recv, own);
@@ -631,7 +640,8 @@ export class SharedSession {
     this.saving = (async () => {
       try {
         const res = await saveNote(this.ns, this.path, md, this.meta.get('etag'));
-        if (this.closed) return;
+        // The save landed; the room it was for is gone if gen moved.
+        if (this.closed || gen !== this.gen) return;
         if (res.etag) this.ownEtags.add(res.etag);
         const untouched = this.ownSent === own;
         this._setAgreed(res.etag || null, md, md, false);
@@ -640,7 +650,7 @@ export class SharedSession {
         this._sendSaved(recv, untouched ? this.ownSent : own);
         this.onEvent({ type: 'saved', text: md, etag: res.etag });
       } catch (e) {
-        if (this.closed) return;
+        if (this.closed || gen !== this.gen) return;
         if (e.status === 409) {
           await this._checkOutside();
           this.savePending = true;
@@ -691,6 +701,7 @@ export class SharedSession {
   async _checkOutside() {
     if (this.checking) { this.recheck = true; return this.checking; }
     if (!this.saver || this.closed || !this.bound || !this.meta.get('hasBase')) return undefined;
+    const gen = this.gen;
     this.checking = (async () => {
       let file;
       try { file = await getNote(this.ns, this.path); } catch (e) {
@@ -700,7 +711,7 @@ export class SharedSession {
         }
         return;
       }
-      if (this.closed) return;
+      if (this.closed || gen !== this.gen || !this.bound) return;
       const { text, etag } = file;
       if (etag && etag === this.meta.get('etag')) return;
       const base = this.meta.get('base') || '';
@@ -743,6 +754,8 @@ export class SharedSession {
   }
 
   _applyFull(text) {
+    // Only into an editor bound to this room's document.
+    if (!this.bound) return;
     const { frontMatter, body } = splitFrontMatter(text);
     this.doc.transact(() => {
       if (this.fm.toString() !== frontMatter) {
