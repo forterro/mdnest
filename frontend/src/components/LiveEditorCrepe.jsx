@@ -37,6 +37,7 @@ import { imageSchema } from '@milkdown/preset-commonmark';
 import { imageBlockSchema } from '@milkdown/components/image-block';
 import { editorViewCtx, nodeViewCtx, parserCtx, serializerCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
+import { Fragment } from '@milkdown/prose/model';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { blockConfig } from '@milkdown/plugin-block';
 import { uploadConfig } from '@milkdown/plugin-upload';
@@ -568,9 +569,32 @@ export default function LiveEditorCrepe({
   // changed). Not added to undo history: Cmd+Z undoes your edits, not theirs.
   const applyExternalDoc = useCallback((markdown) => (ctx) => {
     const view = ctx.get(editorViewCtx);
-    const next = ctx.get(parserCtx)(markdown);
+    let next = ctx.get(parserCtx)(markdown);
     if (!next || typeof next === 'string') throw new Error('parse failed');
     const cur = view.state.doc;
+    // Markdown drops the trailing space of a paragraph, so the incoming text
+    // never has the space the person just typed at the end of the paragraph
+    // they are in, and replacing that paragraph glued their next word to the
+    // last one ("backB0backB1"). When the caret is at the end of a top-level
+    // paragraph that ends in whitespace, and the incoming paragraph ends with
+    // the same words without it, the whitespace is kept.
+    const head = view.state.selection.head;
+    const $h = cur.resolve(head);
+    if ($h.depth === 1 && $h.parent.isTextblock && head === $h.end()) {
+      const idx = $h.index(0);
+      const cb = cur.child(idx);
+      const ws = /\s+$/.exec(cb.textContent);
+      if (ws && idx < next.childCount) {
+        const nb = next.child(idx);
+        // The words just before the caret, on the paragraph's last line only
+        // (an outside change may have touched an earlier line of it).
+        const tail = cb.textContent.slice(0, -ws[0].length);
+        const stem = tail.slice(tail.lastIndexOf('\n') + 1).slice(-24);
+        if (nb.type === cb.type && !/\s$/.test(nb.textContent) && stem && nb.textContent.endsWith(stem)) {
+          next = next.copy(next.content.replaceChild(idx, nb.copy(nb.content.append(Fragment.from(view.state.schema.text(ws[0]))))));
+        }
+      }
+    }
     // Compare blocks ignoring generated heading ids: the live document's
     // headings carry an id a plugin adds after load ("cursor"), a freshly
     // parsed one has "". Compared as-is, the first heading always differed,

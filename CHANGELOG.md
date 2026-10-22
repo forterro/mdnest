@@ -105,6 +105,12 @@ All notable changes to mdnest are documented here.
   Saving that report removed the outside change from the file. The editor
   now reports what it holds at that moment.
 
+- **A word typed right after an outside change was merged in could be glued
+  to the previous word** (also in v4.8.12 and earlier). Markdown drops a
+  paragraph's trailing space, so when a change was merged into the paragraph
+  you were typing at the end of, the space you had just typed went missing
+  and the next word joined the last one. That space is now kept.
+
 ### Tests
 
 - New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)

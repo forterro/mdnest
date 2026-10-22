@@ -82,3 +82,55 @@ test('an outside change merged right after a keystroke survives that keystroke',
     await api(page, 'DELETE', file);
   }
 });
+
+// Markdown drops a paragraph's trailing space. When an outside change was
+// merged into the paragraph the person was typing at the end of, the space
+// they had just typed vanished and their next word was glued to the last
+// one ("typedX" for "typed X").
+test('a merge into the paragraph being typed keeps the space just typed', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => { try { localStorage.setItem('mdnest_editor_mode', 'live'); } catch { /* ignore */ } });
+  await page.goto('/');
+  await page.fill('input[name=username]', USER);
+  await page.fill('input[name=password]', PASS);
+  await page.click('button:has-text("Sign in")');
+  await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
+  const cfg = await page.evaluate(async () => (await fetch('/api/config')).json());
+  test.skip(!!(cfg.liveCollab && cfg.sharedEditing), 'the note poll only runs where the note is not shared');
+
+  const file = `space-merge-${Date.now()}.md`;
+  expect((await api(page, 'POST', file, '# Space\n\nalpha line\nbeta line\n\nlast line\n')).status).toBe(201);
+  let armed = false;
+  let held = false;
+  let release;
+  const released = new Promise((r) => { release = r; });
+  await page.route((u) => u.pathname === '/api/note' && u.searchParams.get('path') === file, async (route) => {
+    if (armed && !held && route.request().method() === 'GET') {
+      held = true;
+      await released;
+    }
+    await route.continue();
+  });
+  try {
+    await page.goto(`/#${NS}/${file}`);
+    await expect(page.locator(EDITOR)).toHaveAttribute('contenteditable', 'true', { timeout: 20_000 });
+    await page.getByText('beta line').first().click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' typed', { delay: 20 });
+    await expect.poll(async () => (await api(page, 'GET', file)).text, { timeout: 15_000 }).toContain('beta line typed');
+    const now = (await api(page, 'GET', file)).text;
+    expect((await api(page, 'PUT', file, now.replace('alpha line', 'alpha line outside'))).status).toBe(200);
+    armed = true;
+    await expect.poll(() => held, { timeout: 15_000, message: 'the note poll never asked' }).toBe(true);
+    // A space, the merge, then the next word.
+    await page.keyboard.type(' ');
+    release();
+    await page.waitForTimeout(1500);
+    await page.keyboard.type('next', { delay: 20 });
+    await expect(page.locator(EDITOR)).toContainText('alpha line outside');
+    await expect.poll(async () => (await api(page, 'GET', file)).text, { timeout: 15_000 }).toContain('beta line typed next');
+  } finally {
+    release();
+    await api(page, 'DELETE', file);
+  }
+});
