@@ -26,11 +26,22 @@ All notable changes to mdnest are documented here.
   clicked during startup**, before a namespace was chosen. They are disabled
   until then.
 
+- **Live notes could stay read-only for good, behind a proxy or network
+  that does not pass websockets** (reported by a user; every note showed
+  "Waiting for the live connection to edit this note together"). Since
+  shared editing (v4.8.10) a Live note waits for its shared document over
+  the websocket, and when that never came the note never unlocked. Now a
+  note waits at most 4 seconds, then edits and saves the normal way for the
+  rest of the visit, and a notice says which step failed (no connection, no
+  reply from the server, editor not attached), so the cause can be found.
+  Every later note opens editable at once.
+
 ### Tests
 
-- The release gate runs the whole browser suite a second time with live
-  collaboration off, the configuration most installs use. New:
-  `cli-default-install.spec.js` (fails on v4.8.12 in all four cases).
+- New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)
+  and `shared-unavailable.spec.js` (a websocket that hangs or is refused;
+  both cases left the note read-only on v4.8.12). The release gate now runs
+  the multi-mode shared-editing suite on every release.
 - `tree-target.spec.js` removes what it creates; it left folders at the
   namespace root and failed 2 times in 20 on repeated runs.
 
