@@ -91,6 +91,13 @@ All notable changes to mdnest are documented here.
   rolled your newest words back. A check now ignores an answer that a save of
   yours overtook.
 
+- **A change merged in from elsewhere could be written over by your next
+  autosave** (also in v4.8.12 and earlier). When a save was refused because
+  the note had changed, the app merged both versions and saved the result.
+  An autosave queued behind it, for text typed before the merge, then wrote
+  that older text over the merged one. An autosave now merges onto the
+  newest saved text first.
+
 ### Tests
 
 - New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)

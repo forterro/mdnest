@@ -2003,6 +2003,8 @@ function App() {
     if (collabRef.current) collabRef.current.sendContent(newContent);
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    // The saved text this edit was made on (see doSave).
+    const madeOn = savedContentRef.current;
     // Named so flushPendingSave() can run it immediately when the user
     // navigates away before the debounce elapses. It closes over the path,
     // namespace and content of the edit that scheduled it, so running it late
@@ -2011,7 +2013,17 @@ function App() {
       if (seq !== saveSeqRef.current) return; // a newer save will write all of this
       // The note joined its room meanwhile: the room's saver writes it.
       if (sharedBoundRef.current) return;
-      if (newContent === savedContentRef.current) return; // nothing new to write
+      // This edit was made on `madeOn`. If the saved text moved since (an
+      // outside change was merged in while this save waited behind another),
+      // writing the edit as it is would put the old text back over the
+      // merged-in change, with a fresh etag, so nothing would refuse it.
+      // Rebase the edit onto the saved text first.
+      let content = newContent;
+      if (savedContentRef.current !== madeOn) {
+        const { mergeThreeWay } = await import('./sharedText.js');
+        content = mergeThreeWay(madeOn, newContent, savedContentRef.current);
+      }
+      if (content === savedContentRef.current) return; // nothing new to write
       // What this edit was made on top of: the text we last saved or were
       // handed (a load, a remote save), or someone's live typing we were
       // showing when we started to type (shown, never saved as ours).
@@ -2025,14 +2037,17 @@ function App() {
       // The deliberate clear-this-file path uses clearNote() (allow-empty=1)
       // and bypasses this guard. The backend has the same check as a
       // last line of defense in case this ever fails to fire.
-      if (newContent === '' && (savedContentRef.current || '') !== '') {
+      if (content === '' && (savedContentRef.current || '') !== '') {
         console.warn('mdnest: autosave skipped — refusing to overwrite non-empty note with empty content. Use the explicit clear action to deliberately empty a file.');
         return;
       }
       const saveToken = echoGate.beginSave();
       try {
-        const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
-        setSavedContent(newContent);
+        const result = await saveNote(selectedNs, currentPath, content, etagRef.current);
+        // At once, not on the next render: the next edit records what it was
+        // made on from this.
+        savedContentRef.current = content;
+        setSavedContent(content);
         if (result.etag) { etagRef.current = result.etag; echoGate.rememberOwnEtag(result.etag); }
       } catch (e) {
         if (e.status === 409) {
@@ -2041,17 +2056,19 @@ function App() {
           let resolved = false;
           try {
             const latest = await getNote(selectedNs, currentPath);
-            if (latest.text === newContent) {
+            if (latest.text === content) {
               resolved = true;
-              setSavedContent(newContent);
+              savedContentRef.current = content;
+              setSavedContent(content);
               etagRef.current = latest.etag;
             } else if (latest.text === base || (shownRemote !== null && latest.text === shownRemote)) {
               // The server holds exactly what this edit was built on (we had
               // already seen that text, e.g. through someone's live typing,
               // only its etag was newer). Nothing of theirs is lost by
               // writing ours on top, so save again with the current etag.
-              const retry = await saveNote(selectedNs, currentPath, newContent, latest.etag);
-              setSavedContent(newContent);
+              const retry = await saveNote(selectedNs, currentPath, content, latest.etag);
+              savedContentRef.current = content;
+              setSavedContent(content);
               if (retry.etag) { etagRef.current = retry.etag; echoGate.rememberOwnEtag(retry.etag); }
               resolved = true;
             }
@@ -2065,7 +2082,7 @@ function App() {
               // CLI, an agent, another tab. Merge their change with this
               // typing and save the result, so neither is lost. Lines both
               // sides changed differently keep both (sharedText.mergeThreeWay).
-              resolved = await mergeAndSave(selectedNs, currentPath, base, newContent, latest);
+              resolved = await mergeAndSave(selectedNs, currentPath, base, content, latest);
             }
           } catch { /* fall through to the banner */ }
           if (!resolved) setConflictBanner({ username: 'another user', etag: e.etag });
