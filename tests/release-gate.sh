@@ -19,7 +19,8 @@
 #      backend-image-init, e2e-browser
 #   2. Go vet + go test -race WITH a real Redis (host Go, else Docker), so the
 #      durability-queue tests run instead of skipping
-#   3. shellcheck (host, else Docker)
+#   3. the browser suite again with live collaboration off (the default
+#      install), then shellcheck (host, else Docker)
 #   4. the suites the changed files call for, compared with origin/main:
 #        backend/storage, deploy/helm, factory     -> e2e-ha-durability.sh
 #        collab, save paths, Live editor, App.jsx  -> e2e-collab-multi.sh
@@ -95,6 +96,13 @@ go_suite() {
   return $rc
 }
 run "Go vet + go test -race, with Redis" go.log go_suite
+
+# 2b. The browser suite again on a DEFAULT install: live collaboration off.
+# It is off unless an operator turns it on, so most installs run this way, yet
+# until v4.8.13 no suite ever did, and an agent's change to an open note could
+# go unseen or lose the person's typing there without any test noticing.
+default_install_browser() { MDNEST_E2E_LIVE_COLLAB=false bash tests/e2e-browser.sh; }
+run "browser suite on a default install (live collaboration off)" browser-default.log default_install_browser
 
 # 3. shellcheck, the same files and severity as CI.
 SC_FILES=(setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh)
