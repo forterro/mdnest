@@ -608,10 +608,18 @@ for (const variant of ['pauses', 'nonstop']) {
         console.log(`RESULT (h ${variant}) ${who}: ${samples} samples, ${gone.length} problems${gone.length ? ` first seen with: ${JSON.stringify(text)}` : ''}`);
         expect(gone, `${who}: own words left the screen while joining`).toEqual([]);
       }
-      await expect.poll(async () => {
+      // Each bad word with its count: 0 is missing, 2 or more is doubled
+      // (different bugs). The file goes to the log when anything is off.
+      const badWords = async () => {
         const disk = await readNote(pageA, file);
-        return words.filter((w) => disk.split(new RegExp(`\\b${w}\\b`)).length - 1 !== 1);
-      }, { timeout: 15_000, message: 'words missing or doubled on disk' }).toEqual([]);
+        const bad = words.map((w) => [w, disk.split(new RegExp(`\\b${w}\\b`)).length - 1]).filter(([, n]) => n !== 1);
+        return { bad: bad.map(([w, n]) => `${w}=${n}`), disk };
+      };
+      await expect.poll(async () => (await badWords()).bad, { timeout: 15_000 }).toEqual([]).catch(async (e) => {
+        const { bad, disk } = await badWords();
+        console.log(`RESULT (h ${variant}) bad words ${bad.join(' ')} disk=${JSON.stringify(disk)}`);
+        throw e;
+      });
       await expect.poll(() => noteText(pageB), { timeout: 10_000 }).toBe(await noteText(pageA));
       // And they are together again: typing shows live.
       await say(pageA, 'together');
