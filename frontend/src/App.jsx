@@ -2019,7 +2019,13 @@ function App() {
       // merged-in change, with a fresh etag, so nothing would refuse it.
       // Rebase the edit onto the saved text first.
       let content = newContent;
-      if (savedContentRef.current !== madeOn) {
+      // Only while this edit's note is still the open one: savedContentRef
+      // and etagRef describe the open note, and a save queued behind a slow
+      // one can run after a switch. Rebasing then would merge the OTHER
+      // note's text into this one. Off the open note the edit is written as
+      // it was made (the server's If-Match still refuses a stale write).
+      const sameNote = selectedNsRef.current === selectedNs && currentPathRef.current === currentPath;
+      if (sameNote && savedContentRef.current !== madeOn) {
         const { mergeThreeWay } = await import('./sharedText.js');
         content = mergeThreeWay(madeOn, newContent, savedContentRef.current);
       }
