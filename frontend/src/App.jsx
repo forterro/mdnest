@@ -635,11 +635,17 @@ function App() {
   // someone else is in the note it switches to Live, because a textarea
   // saving its own copy would fight the room.
   const sharedEditingOn = !!appConfig?.sharedEditing;
+  // The shared editing chunk, loaded once when shared editing is on: the
+  // Live editor registers its collab plugin at creation. false: it failed.
+  const [sharedMod, setSharedMod] = useState(null);
+  const sharedModOk = sharedMod !== false;
   // The note is editable at once, every time: until its shared document is
   // bound it saves the normal way (autosave, merge on a refused save), and a
   // dropped connection goes back to that. Nothing waits for the websocket.
   const noteLoaded = content !== null;
-  const sharedEligible = sharedEditingOn && noteLoaded
+  // sharedMod (above) is false when the shared editing chunk could not be
+  // loaded: notes then simply edit the normal way.
+  const sharedEligible = sharedEditingOn && sharedModOk && noteLoaded
     && isSharedEligible({ path: currentPath, isDrawing: isDrawingDoc, isChat: chatNoteActive, isMarp: marpActive });
   const othersInNote = presenceUsers.some((u) => u.id !== userInfo?.id);
   const sharedForcesLive = sharedEligible && othersInNote && liveCrashedFor !== currentPath;
@@ -649,9 +655,7 @@ function App() {
   const [sharedBound, setSharedBound] = useState(false);
   // Read by the save paths: while bound, the room's saver writes the note.
   const sharedBoundRef = useRef(false);
-  // The shared editing chunk, loaded once when shared editing is on: the
-  // Live editor registers its collab plugin at creation.
-  const [sharedMod, setSharedMod] = useState(null);
+
   // The connection dot: 'connected', or 'down' once the socket has been down
   // for LIVE_DOWN_AFTER_MS. null until the first answer.
   const [liveShown, setLiveShown] = useState(null);
@@ -1127,9 +1131,10 @@ function App() {
   // Load the shared editing chunk once, as soon as the server says shared
   // editing is on, so opening a note never waits for it.
   useEffect(() => {
-    if (!sharedEditingOn || sharedMod) return;
+    if (!sharedEditingOn || sharedMod !== null) return;
     loadWithRetry(() => import('./sharedDoc.js')).then(setSharedMod).catch((e) => {
-      console.error('mdnest: could not load shared editing', e);
+      console.error('mdnest: could not load shared editing; notes save the normal way', e);
+      setSharedMod(false);
     });
   }, [sharedEditingOn, sharedMod]);
 
