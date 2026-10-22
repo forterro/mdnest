@@ -4,6 +4,15 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.13 (in progress)
+
+### Release process
+
+- **A release push takes seconds.** The pre-push hook checks the release
+  gate's record before anything else: a tree the gate passed is accepted at
+  once, any other tree is refused at once. It used to rerun its own checks
+  first, and GitHub dropped the connection while it did.
+
 ## v4.8.12: No lost chat messages on HA installs, and Go 1.26.10
 
 Two important fixes. On HA installs (app replicas and one writer), appends
