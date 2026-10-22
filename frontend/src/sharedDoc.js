@@ -27,15 +27,18 @@
 // The room never blocks typing (v4.8.13). The editor is editable from the
 // start and saves the normal way (App's autosave) until the room is there.
 // Then the session binds to the editor AS IT IS at that moment: an empty room
-// is seeded from the editor's own document, a room that already has text is
-// joined and the typing done before is merged into it. When the socket goes
+// is seeded from the editor's own document; a room that already has text is
+// joined at once if this tab has nothing of its own, and otherwise once the
+// room holds the same text as the editor (the room's saver merges this tab's
+// normal saves from the file; merging here as well kept a line twice when
+// the room had not caught up yet). When the socket goes
 // away, the editor is unbound again and the app takes over saving, starting
 // from the room's last save; a later rejoin starts from a fresh document, so
 // nothing this tab merged through the file is replayed into the room twice.
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab';
-import { undo as yUndo, redo as yRedo, prosemirrorToYXmlFragment } from 'y-prosemirror';
+import { undo as yUndo, redo as yRedo, prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror';
 import { prosePluginsCtx } from '@milkdown/core';
 import { saveNote, getNote, saveNoteOnLeave } from './api.js';
 import {
@@ -81,6 +84,10 @@ export class SharedSession {
     this.canWrite = !!canWrite;
     this.onEvent = onEvent || (() => {});
     this.prepare = prepare || (() => ({ base: '', etag: null }));
+    // The file text this session started from (or that the room had saved
+    // when the socket went). A tab still on it, with nothing typed, has
+    // nothing the room lacks.
+    this.startBase = this.prepare().base;
     this.user = user || { name: 'someone', color: '#89b4fa' };
 
     this.saver = false;
@@ -190,6 +197,19 @@ export class SharedSession {
     const ours = joinFrontMatter(oursFm, ed.serialize());
     const normBase = ed.normalize(base);
     const clean = ours === base || ours === normBase;
+    if (!seeding && !(clean && base === this.startBase)) {
+      // This tab has text of its own (typed, or saved the normal way while
+      // apart from the room). It keeps saving the normal way, the room's
+      // saver merges those saves from the file, and the editor joins once
+      // the room holds the same text, so nothing is merged twice.
+      let room = null;
+      try { room = joinFrontMatter(this.fm.toString(), ed.serializeNode(yXmlFragmentToProseMirrorRootNode(this.fragment, ed.schema()))); } catch { room = null; }
+      if (room !== ours) {
+        this._waitForRoom();
+        return;
+      }
+    }
+    this._stopWaiting();
     const sel = ed.getSelection();
     this.binding = true;
     ed.editor.action((ctx) => {
@@ -240,12 +260,6 @@ export class SharedSession {
       }, META);
       if (clean) this._sendSaved(this.lastSeq, this.ownSent);
       else if (this.saver) this._scheduleSave(0);
-    } else if (!clean) {
-      // Typing done before the room was there goes into the room, as an
-      // ordinary edit, so everyone gets it and the saver writes it.
-      const theirs = this.fullMarkdown();
-      const merged = mergeThreeWay(normBase, ours, theirs);
-      if (merged !== theirs) this._applyFull(merged);
     }
     ed.setSelection(sel);
     this.onEvent({ type: 'bound' });
@@ -262,17 +276,31 @@ export class SharedSession {
     }
   }
 
+  // Check again shortly: the room and the editor converge through the file.
+  _waitForRoom() {
+    if (!this.waitTimer) this.waitTimer = setInterval(() => this._maybeBind(), 400);
+  }
+
+  _stopWaiting() {
+    if (this.waitTimer) clearInterval(this.waitTimer);
+    this.waitTimer = null;
+  }
+
   // Take the editor off the room; it keeps its document and its history.
   _unbindEditor() {
     const ed = this.editor;
     this.bound = false;
     if (!ed) return;
+    let sel = null;
+    try { sel = ed.getSelection(); } catch { /* the editor is being destroyed */ }
     try {
       ed.editor.action((ctx) => {
         const history = this.history || [];
         if (history.length) ctx.update(prosePluginsCtx, (ps) => ps.concat(history.filter((h) => !ps.includes(h))));
         ctx.get(collabServiceCtx).disconnect();
       });
+      // Same document, so the same caret, and the keyboard stays here.
+      if (sel) ed.setSelection(sel);
     } catch { /* the editor is being destroyed */ }
     this.history = null;
   }
@@ -287,6 +315,7 @@ export class SharedSession {
     if (wasBound) {
       const text = this.fullMarkdown();
       const base = this.meta.get('base');
+      this.startBase = typeof base === 'string' ? base : text;
       handover = {
         type: 'unbound',
         base: typeof base === 'string' ? base : text,
@@ -297,6 +326,7 @@ export class SharedSession {
     }
     this._cancelSave();
     this._stopPoll();
+    this._stopWaiting();
     this.bound = false;
     this.ready = false;
     this.seed = false;
@@ -681,6 +711,7 @@ export class SharedSession {
     this.closed = true;
     this._cancelSave();
     this._stopPoll();
+    this._stopWaiting();
     window.removeEventListener('pagehide', this._onPageHide);
     this.awareness.off('update', this._onAwareness);
     this.awareness.destroy();

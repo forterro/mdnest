@@ -755,6 +755,8 @@ export default function LiveEditorCrepe({
       editor: crepe.editor,
       frontMatter: () => fmRef.current,
       serialize: () => restoreWikilinks(crepe.getMarkdown()),
+      schema: () => withView((view) => view.state.schema),
+      serializeNode: (node) => withView((_view, ctx) => restoreWikilinks(ctx.get(serializerCtx)(node))),
       // A text as this editor would write it back, so "unchanged" can be
       // told apart from the serializer's own normalizing.
       normalize: (full) => {
@@ -771,7 +773,10 @@ export default function LiveEditorCrepe({
       // The document to seed an empty room with, without what only this
       // editor adds (generated heading ids): the room holds the note.
       seedDoc: () => withView((view) => view.state.schema.nodeFromJSON(stripBlockIds(view.state.doc.toJSON()))),
-      getSelection: () => withView((view) => ({ anchor: view.state.selection.anchor, head: view.state.selection.head })),
+      // The caret, and whether the person is typing here: joining the room
+      // re-renders the whole document, which drops keyboard focus, and
+      // whatever they type next would go nowhere.
+      getSelection: () => withView((view) => ({ anchor: view.state.selection.anchor, head: view.state.selection.head, focused: view.hasFocus() })),
       setSelection: (sel) => {
         if (!sel) return;
         try {
@@ -782,6 +787,9 @@ export default function LiveEditorCrepe({
             view.dispatch(tr.setMeta('addToHistory', false));
           });
         } catch { /* a position that is no longer text: leave the caret */ }
+        if (sel.focused) {
+          try { withView((view) => { if (!view.hasFocus()) view.focus(); }); } catch { /* editor gone */ }
+        }
       },
       applyBody: (md) => {
         try {

@@ -2968,6 +2968,8 @@ function App() {
                 <div
                   ref={editorWrapperRef}
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
+                  // For tests and support: whether this note is in its room.
+                  data-shared={wantShared ? (sharedBound ? 'bound' : 'apart') : undefined}
                   style={!(isMobile ? mobileView === 'editor' : viewMode !== 'preview')
                     ? { display: 'none' }
                     : (!isMobile && viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined)}
