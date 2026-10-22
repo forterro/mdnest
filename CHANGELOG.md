@@ -6,6 +6,34 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.13 (in progress)
 
+### Fixed
+
+- **An agent's or the CLI's change to an open note now shows, and never
+  costs the person their typing, on a default install.** With live
+  collaboration off (the default), the browser only checked an open note
+  once a minute, so a change made with `mdnest append` or by an agent could
+  sit unseen for that long. Worse, if the person was typing, their next save
+  was refused, a "modified by an external source" banner appeared, and what
+  they typed after that was lost on reload. Now:
+  - the open note is checked every 5 seconds (an unchanged note costs a
+    304, no body), and an idle note shows the change straight away;
+  - a save that was overtaken is merged with the outside change and saved
+    again, in Basic and Live, so both are kept and the caret stays where the
+    person is typing;
+  - where both changed the same line, both versions are kept and a small
+    notice says so.
+- **"+ Note", "+ Folder", "+ Drawing" and "+ Slides" did nothing when
+  clicked during startup**, before a namespace was chosen. They are disabled
+  until then.
+
+### Tests
+
+- The release gate runs the whole browser suite a second time with live
+  collaboration off, the configuration most installs use. New:
+  `cli-default-install.spec.js` (fails on v4.8.12 in all four cases).
+- `tree-target.spec.js` removes what it creates; it left folders at the
+  namespace root and failed 2 times in 20 on repeated runs.
+
 ### Release process
 
 - **A release push takes seconds.** The pre-push hook checks the release
