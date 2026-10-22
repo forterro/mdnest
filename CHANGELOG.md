@@ -98,6 +98,13 @@ All notable changes to mdnest are documented here.
   that older text over the merged one. An autosave now merges onto the
   newest saved text first.
 
+- **An outside change merged into the Live editor right after a keystroke
+  could be saved away again** (also in v4.8.12 and earlier). The editor
+  reports a change a fifth of a second after a keystroke, and it reported the
+  text from that keystroke, before any outside change merged in meanwhile.
+  Saving that report removed the outside change from the file. The editor
+  now reports what it holds at that moment.
+
 ### Tests
 
 - New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)

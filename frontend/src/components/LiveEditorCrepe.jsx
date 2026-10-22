@@ -473,7 +473,15 @@ export default function LiveEditorCrepe({
     if (collabPlugin) tryUse(collabPlugin, 'collab');
 
     crepe.on((listener) => {
-      listener.markdownUpdated((_ctx, markdown, prev) => {
+      listener.markdownUpdated((_ctx, reported, prev) => {
+        // The listener serializes the document of the last USER transaction
+        // and skips ours (an outside change is applied with addToHistory:
+        // false). When one landed in its 200 ms window, `reported` is the
+        // text from before it, and saving that wrote the outside change out
+        // of the file again (live-outside-merge-debounce.spec.js). Report
+        // what the editor holds now instead.
+        let markdown = reported;
+        try { markdown = crepe.getMarkdown(); } catch { /* not ready: use the report */ }
         // Milkdown's serializer escapes [[...]] to \[\[...]] in plain
         // text. Restore wikilink spans so documents containing them
         // round-trip byte-identical through the Live editor.
