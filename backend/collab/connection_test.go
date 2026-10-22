@@ -197,3 +197,39 @@ func TestConnRecheckAfterAccessChanged(t *testing.T) {
 		t.Fatalf("after access was removed: %+v", ms)
 	}
 }
+
+func TestConnRefusesJoinsAfterTheTokenExpires(t *testing.T) {
+	h := NewHub()
+	a := sessionConn(1, "a", allowAll)
+	a.Expires = time.Now().Add(-time.Second)
+	a.handle(h, false, joinMsg("ns", "a.md", 1))
+	if ms := noteMsgs(a); len(ms) != 1 || ms[0].Type != "join-error" || ms[0].Error != "expired" {
+		t.Fatalf("a join after expiry: %+v", ms)
+	}
+	if _, _, ok := a.Note(); ok {
+		t.Fatal("joined after expiry")
+	}
+}
+
+// DropUsers checks again, through Authorize, every connection that ended up
+// in the note, so a join that passed the old member list cannot stay.
+func TestConnDropUsersRechecksThroughAuthorize(t *testing.T) {
+	h := NewHub()
+	member := true
+	auth := func(ns, p string) (string, bool, string) {
+		if p == "chat.md" && !member {
+			return "", false, "forbidden"
+		}
+		return p, false, ""
+	}
+	a := sessionConn(1, "a", auth)
+	h.addConn(a)
+	a.handle(h, false, joinMsg("ns", "chat.md", 1))
+	noteMsgs(a)
+	member = false
+	// keep says yes (the stale list the caller read), Authorize says no.
+	h.DropUsers("ns", "chat.md", func(int) bool { return true })
+	if ms := noteMsgs(a); len(ms) != 1 || ms[0].Type != "note-left" {
+		t.Fatalf("a connection the checker refuses stayed in the note: %+v", ms)
+	}
+}

@@ -44,8 +44,12 @@ type Conn struct {
 	ReadOnly bool
 	// Authorize checks every join. Nil refuses every join.
 	Authorize Authorizer
-	ws        *websocket.Conn
-	send      chan []byte
+	// Expires is when the session token the socket opened with runs out.
+	// A visit socket lives long, so after this it joins nothing and closes;
+	// the client opens a new one with its current token. Zero: no expiry.
+	Expires time.Time
+	ws      *websocket.Conn
+	send    chan []byte
 	// dropped is set when a reliable send could not be queued; the
 	// connection is closed so the client reconnects and syncs again.
 	dropped bool
@@ -186,11 +190,13 @@ func (c *Conn) noteLeftLocked(ns, path, reason string) {
 }
 
 // recheck takes the connection out of its note when Authorize no longer
-// lets it be there as it is.
-func (c *Conn) recheck(hub *Hub) {
+// lets it be there as it is. With only != "", it checks the connection only
+// if it is in that note key. It takes c.mu, so it runs after a join that is
+// in progress and checks what that join ended up in.
+func (c *Conn) recheck(hub *Hub, only string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.joined {
+	if !c.joined || (only != "" && noteKey(c.ns, c.path) != only) {
 		return
 	}
 	code, readOnly := "forbidden", false
@@ -248,6 +254,14 @@ func (c *Conn) control(hub *Hub, data []byte) bool {
 func (c *Conn) join(hub *Hub, ns, rawPath string, seq int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.Expires.IsZero() && !time.Now().Before(c.Expires) {
+		c.leaveLocked(hub)
+		c.sendNoteMsg(noteMsg{Type: "join-error", Seq: seq, Ns: ns, Path: rawPath, Error: "expired"})
+		if c.ws != nil {
+			go c.ws.Close(websocket.StatusPolicyViolation, "session expired")
+		}
+		return
+	}
 	if !c.allowJoin(time.Now()) {
 		c.sendNoteMsg(noteMsg{Type: "join-error", Seq: seq, Ns: ns, Path: rawPath, Error: "rate"})
 		return
@@ -277,8 +291,13 @@ func (c *Conn) join(hub *Hub, ns, rawPath string, seq int) {
 }
 
 // ReadLoop reads messages from the client and dispatches them.
-// Blocks until the connection is closed.
+// Blocks until the connection is closed, or until Expires.
 func (c *Conn) ReadLoop(ctx context.Context, hub *Hub) {
+	if !c.Expires.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, c.Expires)
+		defer cancel()
+	}
 	hub.addConn(c)
 	defer func() {
 		hub.removeConn(c)

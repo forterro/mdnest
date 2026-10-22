@@ -247,6 +247,11 @@ func (h *Hub) DropUsers(ns, path string, keep func(userID int) bool) {
 	for _, c := range drop {
 		c.LeaveNote(h, ns, path, "access")
 	}
+	// A join that was being checked while the list changed may have passed
+	// the old list and landed after the snapshot above. Check every
+	// connection in the note again, through Authorize (the real list), after
+	// any join in progress has finished.
+	h.recheckWhere(key)
 }
 
 func (h *Hub) addConn(c *Conn) {
@@ -265,7 +270,9 @@ func (h *Hub) removeConn(c *Conn) {
 // after grants, groups or admins changed. A connection that may no longer
 // be there, or whose read-only state changed, leaves the note; the client
 // joins again and gets the access it has now.
-func (h *Hub) RecheckAccess() {
+func (h *Hub) RecheckAccess() { h.recheckWhere("") }
+
+func (h *Hub) recheckWhere(key string) {
 	h.mu.RLock()
 	all := make([]*Conn, 0, len(h.conns))
 	for c := range h.conns {
@@ -273,7 +280,7 @@ func (h *Hub) RecheckAccess() {
 	}
 	h.mu.RUnlock()
 	for _, c := range all {
-		c.recheck(h)
+		c.recheck(h, key)
 	}
 }
 

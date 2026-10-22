@@ -93,6 +93,10 @@ func (h *WSHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	conn := collab.NewConn(ws, uc.ID, uc.Username)
 	conn.Authorize = authorize
+	// The socket lasts the visit, so it must not outlive the login.
+	if exp, err := claims.GetExpirationTime(); err == nil && exp != nil {
+		conn.Expires = exp.Time
+	}
 	if perNote {
 		conn.Enter(h.hub, ns, path, readOnly)
 	}
