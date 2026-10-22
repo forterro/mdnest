@@ -630,3 +630,69 @@ for (const variant of ['pauses', 'nonstop']) {
     }
   });
 }
+
+// The race behind a doubled line, pinned without timing luck. The room's
+// saver starts a check of the file (after an outside change); that request
+// is held until the saver's socket has been cut and its editor has gone back
+// to saving the normal way. When the answer then arrives it must change
+// nothing: the editor keeps what the person typed meanwhile, and the file
+// ends up with every word once.
+test('(i) a file check that outlives the room changes nothing when it returns', async ({ browser }) => {
+  test.setTimeout(150_000);
+  if (!USER2) test.skip(true, 'needs MDNEST_USER2 (tests/e2e-collab-multi.sh)');
+  const a = await browser.newContext();
+  const b = await browser.newContext();
+  const pageA = await a.newPage();
+  const pageB = await b.newPage();
+  const sock = await cuttableSocket(pageA);
+  await login(pageA, USER, PASS);
+  await login(pageB, USER2, PASS2);
+  const file = `lnb-i-${Date.now()}.md`;
+  await makeNote(pageA, file, '# Held\n\nmy line\n\nother line\n');
+  // Hold the next GET of this note from A's page, once armed.
+  let armed = false;
+  let held = null;
+  let release;
+  const released = new Promise((r) => { release = r; });
+  await pageA.route((u) => u.pathname === '/api/note' && u.searchParams.get('path') === file, async (route) => {
+    if (armed && !held && route.request().method() === 'GET') {
+      held = route;
+      await released;
+    }
+    await route.continue();
+  });
+  try {
+    expect(await openAndTime(pageA, file, 'my line')).toBeGreaterThanOrEqual(0);
+    await expect(pageA.locator('.editor-wrapper[data-shared=bound]')).toHaveCount(1, { timeout: 15_000 });
+    await typeAfter(pageA, 'my line', ' roomword');
+    await expect.poll(() => readNote(pageA, file), { timeout: 15_000 }).toContain('my line roomword');
+
+    // An outside change: A, the saver, checks the file, and that GET is held.
+    armed = true;
+    const disk = await readNote(pageA, file);
+    expect((await api(pageB, 'PUT', file, disk.replace('other line', 'other line outside'))).status).toBe(200);
+    await expect.poll(() => held !== null, { timeout: 15_000, message: 'the saver never checked the file' }).toBe(true);
+
+    // The socket goes; the editor unbinds and A keeps typing, no click.
+    sock.cut();
+    await expect(pageA.locator('.editor-wrapper[data-shared=apart]')).toHaveCount(1, { timeout: 15_000 });
+    await pageA.keyboard.type(' apartword', { delay: 15 });
+    await pageA.waitForTimeout(300);
+
+    // Now the old check's answer arrives.
+    release();
+    await pageA.waitForTimeout(2500);
+    const shown = await noteText(pageA);
+    for (const w of ['roomword', 'apartword']) expect(shown, `${w} left the screen`).toContain(w);
+
+    await expect.poll(async () => {
+      const t = await readNote(pageA, file);
+      return ['roomword', 'apartword', 'outside'].map((w) => `${w}=${t.split(w).length - 1}`);
+    }, { timeout: 20_000 }).toEqual(['roomword=1', 'apartword=1', 'outside=1']);
+  } finally {
+    release();
+    sock.restore();
+    await api(pageA, 'DELETE', file);
+    await a.close(); await b.close();
+  }
+});
