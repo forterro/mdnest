@@ -414,8 +414,7 @@ if [ "$RUN_HEAVY" -eq 1 ]; then
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
     echo "SKIPPED (docker not available — run 'bash tests/e2e-sec-multi.sh' before merging)"
   else
-    bash tests/e2e-sec-multi.sh > /tmp/mdnest-e2e-sec.log 2>&1
-    rc=$?
+    bash tests/e2e-sec-multi.sh > /tmp/mdnest-e2e-sec.log 2>&1 && rc=0 || rc=$?  # under set -e a bare failure would end the hook silently
     if [ "$rc" -eq 0 ]; then
       echo "OK"
     elif [ "$rc" -eq 2 ]; then
@@ -433,8 +432,7 @@ if [ "$RUN_HEAVY" -eq 1 ]; then
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
     echo "SKIPPED (docker not available, run 'bash tests/backend-image-init.sh' before merging)"
   else
-    bash tests/backend-image-init.sh > /tmp/mdnest-image-init.log 2>&1
-    rc=$?
+    bash tests/backend-image-init.sh > /tmp/mdnest-image-init.log 2>&1 && rc=0 || rc=$?  # under set -e a bare failure would end the hook silently
     if [ "$rc" -eq 0 ]; then
       echo "OK"
     elif [ "$rc" -eq 2 ]; then
@@ -455,8 +453,7 @@ if [ "$RUN_HEAVY" -eq 1 ]; then
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     echo "SKIPPED (docker+node needed — run 'bash tests/e2e-browser.sh' before merging)"
   else
-    bash tests/e2e-browser.sh > /tmp/mdnest-e2e-browser.log 2>&1
-    rc=$?
+    bash tests/e2e-browser.sh > /tmp/mdnest-e2e-browser.log 2>&1 && rc=0 || rc=$?  # under set -e a bare failure would end the hook silently
     if [ "$rc" -eq 0 ]; then
       echo "OK"
     elif [ "$rc" -eq 2 ]; then

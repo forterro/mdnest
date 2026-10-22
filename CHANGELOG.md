@@ -31,6 +31,14 @@ All notable changes to mdnest are documented here.
   leadership term it fills only what is missing. Found by the new release
   gate before the security release below went out.
 
+- **A chat clicked in the file tree could open as plain text.** If the note
+  that was open finished reloading just after the click, the app forgot that
+  the click was for a chat, and showed the chat's markdown in the editor
+  instead of the chat view. Seen on slow loads. Now only the chat's own load
+  decides.
+- **The pre-push hook said nothing when an end-to-end suite failed.** It
+  stopped at the suite's name without printing FAILED or the log to read.
+
 ### Security
 
 - **Go 1.26.10.** The backend is built with Go 1.26.10, which fixes
