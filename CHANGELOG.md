@@ -42,15 +42,31 @@ All notable changes to mdnest are documented here.
   clicked during startup**, before a namespace was chosen. They are disabled
   until then.
 
-- **Live notes could stay read-only for good, behind a proxy or network
-  that does not pass websockets** (reported by a user; every note showed
-  "Waiting for the live connection to edit this note together"). Since
-  shared editing (v4.8.10) a Live note waits for its shared document over
-  the websocket, and when that never came the note never unlocked. Now a
-  note waits at most 4 seconds, then edits and saves the normal way for the
-  rest of the visit, and a notice says which step failed (no connection, no
-  reply from the server, editor not attached), so the cause can be found.
-  Every later note opens editable at once.
+- **Live notes never wait for the connection, and switching notes is quick
+  and quiet** (reported by a user: behind a proxy or a slow or sleeping
+  connection every Live note stayed read-only, with "Waiting for the live
+  connection to edit this note together"). Since shared editing (v4.8.10) a
+  Live note waited for its shared document over the websocket before you
+  could type, and every note switch closed the websocket and opened a new
+  one, so the status flashed "Reconnecting". Now:
+  - a note is editable as soon as it opens. Until the shared document is
+    there it saves the normal way, and when it arrives the editor joins it
+    without losing anything you typed (it is merged in for everyone);
+  - if the connection drops while you edit together, typing keeps working
+    and saving, and the note joins the others again when it is back;
+  - the browser keeps one websocket for the whole visit and switches notes
+    with a message on it. Access to each note is checked on every switch,
+    as before on every connection. A tab left open from an older version
+    keeps working, and a newer browser still works with an older server;
+  - the connection is one small dot next to the people in the note: green
+    "Live", or grey "Not live" after about 2 seconds without a connection.
+    There are no notices about the connection and no "Read-only" bar unless
+    you may not write to the note;
+  - someone removed from a private chat, or whose access was taken away,
+    leaves only that note; the rest of their visit keeps its connection.
+    The connection ends when the login it was opened with expires;
+  - opening a note and leaving it straight away no longer leaves the server
+    holding "unsaved updates" for it.
 
 ### Tests
 
@@ -58,6 +74,16 @@ All notable changes to mdnest are documented here.
   and `shared-unavailable.spec.js` (a websocket that hangs or is refused;
   both cases left the note read-only on v4.8.12). The release gate now runs
   the multi-mode shared-editing suite on every release.
+- New: `live-never-blocks.spec.js` in the multi-mode suite. On develop
+  before this change: a note with a hanging or refused websocket became
+  editable after 4.3 to 4.4 seconds (budget 1 second), a note switch showed
+  "Reconnecting" and the "Read-only" bar, 7 notes used 7 websockets, a person
+  opening on a slow connection could not type for 3 seconds and lost what
+  they typed, and typing while the socket was cut never reached the file. It
+  also pins the older-server fallback, a room seeded from the editor holding
+  exactly the markdown, and open-and-leave with no unsaved updates on the
+  server. Go tests pin every join against grants, the join rate limit,
+  leaving a note on a removed grant or chat membership, and the login expiry.
 - `tree-target.spec.js` removes what it creates; it left folders at the
   namespace root and failed 2 times in 20 on repeated runs.
 

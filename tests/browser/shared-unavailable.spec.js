@@ -3,7 +3,9 @@
 // passes frames. Reported by a user: from v4.8.10 almost every note opened
 // read-only in Live, with "Waiting for the live connection to edit this note
 // together", because the editor waited for a shared document that never came.
-// Notes must stay editable and save the normal way instead.
+// Notes must stay editable and save the normal way instead. Since v4.8.13
+// they are editable at once (nothing waits for the socket) and nothing is
+// said about it beyond the grey "Not live" dot.
 import { test, expect } from '@playwright/test';
 
 const USER = process.env.MDNEST_USER || 'e2e';
@@ -21,12 +23,12 @@ const noteUrl = (file) => `/api/note?ns=${NS}&path=${encodeURIComponent(file)}`;
 
 const BROKEN = {
   // The socket opens but nothing ever comes back.
-  hangs: { handler: (ws) => { ws.onMessage(() => {}); }, why: 'no-reply' },
+  hangs: { handler: (ws) => { ws.onMessage(() => {}); } },
   // The socket is closed as soon as it opens.
-  refused: { handler: (ws) => { ws.close({ code: 1006 }); }, why: 'no-connection' },
+  refused: { handler: (ws) => { ws.close({ code: 1006 }); } },
 };
 
-for (const [how, { handler, why }] of Object.entries(BROKEN)) {
+for (const [how, { handler }] of Object.entries(BROKEN)) {
   test(`live collaboration on but the websocket ${how}: notes stay editable and save`, async ({ page }) => {
     test.setTimeout(90_000);
     await page.routeWebSocket(/\/api\/ws/, handler);
@@ -48,16 +50,18 @@ for (const [how, { handler, why }] of Object.entries(BROKEN)) {
       await expect(page.locator('.toolbar-path')).toContainText(first, { timeout: 20_000 });
       await page.locator('.toolbar button', { hasText: /^Live$/ }).click();
       const editor = page.locator('.editor-wrapper .ProseMirror');
-      // Editable within a few seconds, not read-only for good.
-      await expect(editor).toHaveAttribute('contenteditable', 'true', { timeout: 10_000 });
+      // Editable at once, not after a wait and not read-only for good.
+      await expect(editor).toHaveAttribute('contenteditable', 'true', { timeout: 3_000 });
       await page.locator('.editor-wrapper .ProseMirror p', { hasText: 'hello' }).first().click();
       await page.keyboard.press('End');
       await page.keyboard.type(' typed here');
       await expect.poll(async () => (await api(page, 'GET', noteUrl(first))).text, { timeout: 15_000 })
         .toContain('hello typed here');
       await expect(page.getByText('Waiting for the live connection')).toHaveCount(0);
-      // The notice says which step failed, for a support report.
-      await expect(page.locator('[data-testid=notice-bar]')).toContainText(why);
+      // No notice about the connection; the dot says "Not live".
+      await expect(page.locator('[data-testid=notice-bar]')).toHaveCount(0);
+      await expect(page.locator('.editor-readonly-bar')).toHaveCount(0);
+      await expect(page.locator('.ws-status')).toContainText('Not live', { timeout: 10_000 });
 
       // The next note does not wait at all.
       await page.goto(`/#${NS}/${second}`);

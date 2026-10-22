@@ -83,9 +83,12 @@ import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
 // them (no live collaboration): the CLI, agents, git-sync. A 304 when nothing
 // changed, so the check is cheap.
 const NOTE_POLL_MS = 5000;
-// How long a Live note waits for its shared document before editing the
-// normal way instead.
-const SHARED_BIND_WAIT_MS = 4000;
+// The connection dot turns grey only after the socket has been down this
+// long, so a blip (or anything during a note switch) never flickers it.
+const LIVE_DOWN_AFTER_MS = 2000;
+// A shared note not bound by then is logged to the console (whyUnbound), for
+// a support report. Nothing waits for it and the person sees nothing.
+const SHARED_SLOW_LOG_MS = 5000;
 import {
   getToken,
   getNote,
@@ -632,13 +635,11 @@ function App() {
   // someone else is in the note it switches to Live, because a textarea
   // saving its own copy would fight the room.
   const sharedEditingOn = !!appConfig?.sharedEditing;
-  // Set for the rest of this page visit when a shared document never arrived:
-  // a proxy, CDN or network that refuses websockets, or accepts them and
-  // passes nothing. Notes then edit and save the normal way (which merges
-  // outside changes) instead of sitting read-only. Reload to try again.
-  const [sharedUnavailable, setSharedUnavailable] = useState(false);
+  // The note is editable at once, every time: until its shared document is
+  // bound it saves the normal way (autosave, merge on a refused save), and a
+  // dropped connection goes back to that. Nothing waits for the websocket.
   const noteLoaded = content !== null;
-  const sharedEligible = sharedEditingOn && !sharedUnavailable && noteLoaded
+  const sharedEligible = sharedEditingOn && noteLoaded
     && isSharedEligible({ path: currentPath, isDrawing: isDrawingDoc, isChat: chatNoteActive, isMarp: marpActive });
   const othersInNote = presenceUsers.some((u) => u.id !== userInfo?.id);
   const sharedForcesLive = sharedEligible && othersInNote && liveCrashedFor !== currentPath;
@@ -646,6 +647,14 @@ function App() {
   const wantShared = sharedEligible && editorModeForNote === 'live' && liveCrashedFor !== currentPath;
   const [sharedSession, setSharedSession] = useState(null);
   const [sharedBound, setSharedBound] = useState(false);
+  // Read by the save paths: while bound, the room's saver writes the note.
+  const sharedBoundRef = useRef(false);
+  // The shared editing chunk, loaded once when shared editing is on: the
+  // Live editor registers its collab plugin at creation.
+  const [sharedMod, setSharedMod] = useState(null);
+  // The connection dot: 'connected', or 'down' once the socket has been down
+  // for LIVE_DOWN_AFTER_MS. null until the first answer.
+  const [liveShown, setLiveShown] = useState(null);
   const [sharedDisabled, setSharedDisabled] = useState(false);
   const etagRef = useRef(null);
   // Echo gate: recognizes the file-changed echoes of this tab's own saves so
@@ -954,11 +963,14 @@ function App() {
   useEffect(() => {
     if (!appConfig?.liveCollab) return;
     const client = new CollabClient((msg) => {
-      const shared = sharedRef.current && !sharedRef.current.closed ? sharedRef.current : null;
+      const session = sharedRef.current && !sharedRef.current.closed ? sharedRef.current : null;
       if (typeof msg.type === 'string' && msg.type.startsWith('yjs-')) {
-        if (shared) shared.onControl(msg);
+        if (session) session.onControl(msg);
         return;
       }
+      // The room's document only while it is bound; otherwise the note is on
+      // the normal path and handles these the normal way.
+      const shared = session && session.bound ? session : null;
       switch (msg.type) {
         case 'presence':
           presenceHold.current.setAll(msg.users || []);
@@ -971,10 +983,10 @@ function App() {
           setRemoteCursors((prev) => ({ ...prev, [msg.userId]: { ...msg, type: 'selection' } }));
           break;
         case 'join':
-          if (shared) shared.announce();
+          if (session) session.announce();
           break;
         case 'leave':
-          if (shared) shared.forgetUser(msg.userId);
+          if (session) session.forgetUser(msg.userId);
           setRemoteCursors((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           presenceHold.current.remove(msg.userId);
@@ -1031,19 +1043,19 @@ function App() {
       }
     }, setWsStatus);
     collabRef.current = client;
-    // The connect effect below runs when the open note changes. If the config
-    // (liveCollab) arrived after a note was already open, as on a page load
-    // straight onto a note, that effect had run with no client and never ran
-    // again: no presence, no live updates, until you switched notes. Connect
-    // to the note that is already open now.
-    if (selectedNsRef.current && currentPathRef.current) client.connect(selectedNsRef.current, currentPathRef.current);
+    // One socket for the visit. The note effect below moves it from note to
+    // note; if the config (liveCollab) arrived after a note was already
+    // open, as on a page load straight onto a note, that effect ran with no
+    // client, so the open note is set here.
+    if (selectedNsRef.current && currentPathRef.current) client.setNote(selectedNsRef.current, currentPathRef.current);
+    client.connect();
     return () => { client.disconnect(); collabRef.current = null; setWsStatus('disconnected'); };
   }, [appConfig?.liveCollab]);
 
   // Connect/disconnect collab when note changes
   useEffect(() => {
     if (!collabRef.current || !selectedNs || !currentPath) {
-      if (collabRef.current) collabRef.current.disconnect();
+      if (collabRef.current) collabRef.current.setNote(null, null);
       presenceHold.current.reset();
       setPresenceUsers([]);
       setRemoteCursors({});
@@ -1051,7 +1063,8 @@ function App() {
       echoGate.reset();
       return;
     }
-    collabRef.current.connect(selectedNs, currentPath);
+    // The same socket, moved to this note (no reconnect, no status change).
+    collabRef.current.setNote(selectedNs, currentPath);
     remoteLiveRef.current = null;
     presenceHold.current.reset();
     setPresenceUsers([]);
@@ -1070,7 +1083,24 @@ function App() {
   const handleSharedEvent = useCallback((ev) => {
     switch (ev.type) {
       case 'bound':
+        sharedBoundRef.current = true;
         setSharedBound(true);
+        // The room writes the note from now on; whatever the normal path had
+        // queued is in the room already (it was bound to the editor as is).
+        if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+        pendingSaveRef.current = null;
+        break;
+      case 'unbound':
+        // The connection went: save the normal way again, starting from what
+        // the room last saved, with anything newer handed to the autosave.
+        sharedBoundRef.current = false;
+        setSharedBound(false);
+        savedContentRef.current = ev.base;
+        setSavedContent(ev.base);
+        etagRef.current = ev.etag;
+        contentRef.current = ev.text;
+        setContent(ev.text);
+        if (ev.text !== ev.base) contentChangeRef.current?.(ev.text);
         break;
       case 'saved':
         // Keep the old path's view of the file current, for a later switch
@@ -1094,76 +1124,62 @@ function App() {
       default:
     }
   }, []);
+  // Load the shared editing chunk once, as soon as the server says shared
+  // editing is on, so opening a note never waits for it.
   useEffect(() => {
-    if (!sharedKey || !collabRef.current) return undefined;
-    let cancelled = false;
-    let session = null;
+    if (!sharedEditingOn || sharedMod) return;
+    loadWithRetry(() => import('./sharedDoc.js')).then(setSharedMod).catch((e) => {
+      console.error('mdnest: could not load shared editing', e);
+    });
+  }, [sharedEditingOn, sharedMod]);
+
+  // The session for the open note starts at once. It joins the room when
+  // the socket is in the note and binds to the editor as it is then; the
+  // editor does not wait for it.
+  useEffect(() => {
+    if (!sharedKey || !collabRef.current || !sharedMod) return undefined;
+    sharedBoundRef.current = false;
     setSharedBound(false);
     setSharedDisabled(false);
-    (async () => {
-      // Anything the old path still had queued for this note is written
-      // first, so the room starts from the file.
-      await flushPendingSave();
-      let mod;
-      try {
-        mod = await loadWithRetry(() => import('./sharedDoc.js'));
-      } catch (e) {
-        console.error('mdnest: could not load shared editing', e);
-        return;
-      }
-      if (cancelled || !collabRef.current) return;
-      const me = userInfo ? (presenceUsersRef.current || []).find((u) => u.id === userInfo.id) : null;
-      session = new mod.SharedSession({
-        client: collabRef.current,
-        ns: selectedNsRef.current,
-        path: currentPathRef.current,
-        initialText: contentRef.current || '',
-        initialBase: savedContentRef.current || '',
-        initialEtag: etagRef.current,
-        canWrite: canWriteCurrent,
-        user: { id: userInfo?.id, name: userInfo?.username || 'someone', color: me?.color || '#89b4fa' },
-        onEvent: handleSharedEvent,
-      });
-      sharedRef.current = session;
-      setSharedSession(session);
-    })();
+    const me = userInfo ? (presenceUsersRef.current || []).find((u) => u.id === userInfo.id) : null;
+    let session = null;
+    session = new sharedMod.SharedSession({
+      client: collabRef.current,
+      ns: selectedNsRef.current,
+      path: currentPathRef.current,
+      canWrite: canWriteCurrent,
+      user: { id: userInfo?.id, name: userInfo?.username || 'someone', color: me?.color || '#89b4fa' },
+      // The file as the normal path holds it, at the moment of binding.
+      prepare: () => ({ base: savedContentRef.current || '', etag: etagRef.current }),
+      onEvent: (ev) => { if (sharedRef.current === session) handleSharedEvent(ev); },
+    });
+    sharedRef.current = session;
+    setSharedSession(session);
+    const slow = setTimeout(() => {
+      const why = session.whyUnbound();
+      if (why) console.warn(`mdnest: shared editing has not started for this note (${why}); it saves the normal way meanwhile`);
+    }, SHARED_SLOW_LOG_MS);
     return () => {
-      cancelled = true;
-      if (session) {
-        // Navigation already flushed it (flushPendingSave); a switch to Basic
-        // alone saves what is pending before the session goes.
-        const s = session;
-        s.leave();
-        s.flush().catch(() => {}).finally(() => s.destroy());
-      }
-      sharedRef.current = null;
+      clearTimeout(slow);
+      // Navigation already flushed it (flushPendingSave); a switch to Basic
+      // alone saves what is pending before the session goes.
+      const s = session;
+      s.leave();
+      s.flush().catch(() => {}).finally(() => s.destroy());
+      if (sharedRef.current === s) sharedRef.current = null;
+      sharedBoundRef.current = false;
       setSharedSession(null);
       setSharedBound(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sharedKey, canWriteCurrent]);
+  }, [sharedKey, canWriteCurrent, sharedMod]);
 
-  // The editor is read-only until the shared document arrives. When it has
-  // not arrived within a few seconds, stop waiting: edit and save the normal
-  // way for the rest of this visit. Before v4.8.13 the note stayed read-only
-  // for good, and behind a proxy that does not pass websockets that was
-  // nearly every note (reported by a user; see shared-unavailable.spec.js).
-  // The unbound session is never the saver, so ending it writes nothing.
+  // The dot: grey only after the socket has been down for a while.
   useEffect(() => {
-    if (!sharedSession || sharedBound || sharedDisabled) return undefined;
-    const t = setTimeout(() => {
-      const why = sharedSession.whyUnbound?.() || 'unknown';
-      console.warn(`mdnest: shared editing did not start for this note (${why}); editing the normal way instead`);
-      setSharedUnavailable(true);
-      setNotice({
-        kind: 'info',
-        text: why === 'no-connection' || why === 'no-reply' || why === 'no-hello'
-          ? `Editing together needs a live connection, and this browser can't get one right now (${why}; often a proxy that does not pass websockets both ways). Your notes save the normal way. Reload to try again.`
-          : `Editing together could not start for this note (${why}). Your notes save the normal way. Reload to try again.`,
-      });
-    }, SHARED_BIND_WAIT_MS);
+    if (wsStatus === 'connected') { setLiveShown('connected'); return undefined; }
+    const t = setTimeout(() => setLiveShown('down'), LIVE_DOWN_AFTER_MS);
     return () => clearTimeout(t);
-  }, [sharedSession, sharedBound, sharedDisabled]);
+  }, [wsStatus]);
 
   // Our cursor colour comes from the presence list (the server picks it).
   useEffect(() => {
@@ -1358,7 +1374,7 @@ function App() {
     const interval = setInterval(async () => {
       // A shared note's saver checks the file itself (file-changed, and on
       // every 409); reloading here would replace the room's text.
-      if (sharedRef.current || document.hidden) return;
+      if (sharedBoundRef.current || document.hidden) return;
       try {
         const got = await getNote(selectedNs, currentPath, { ifNoneMatch: etagRef.current });
 
@@ -1963,6 +1979,8 @@ function App() {
     // still writes to the right file.
     const doSave = async (seq) => {
       if (seq !== saveSeqRef.current) return; // a newer save will write all of this
+      // The note joined its room meanwhile: the room's saver writes it.
+      if (sharedBoundRef.current) return;
       if (newContent === savedContentRef.current) return; // nothing new to write
       // What this edit was made on top of: the text we last saved or were
       // handed (a load, a remote save), or someone's live typing we were
@@ -2005,6 +2023,11 @@ function App() {
               const retry = await saveNote(selectedNs, currentPath, newContent, latest.etag);
               setSavedContent(newContent);
               if (retry.etag) { etagRef.current = retry.etag; echoGate.rememberOwnEtag(retry.etag); }
+              resolved = true;
+            }
+            if (!resolved && sharedBoundRef.current) {
+              // Bound to the room while this save was out: the room's saver
+              // merges the file, merging here too would apply it twice.
               resolved = true;
             }
             if (!resolved) {
@@ -2793,7 +2816,7 @@ function App() {
               return !v;
             });
           }}
-          wsStatus={appConfig?.liveCollab ? wsStatus : null}
+          wsStatus={appConfig?.liveCollab ? liveShown : null}
         />
         {updateAvailable && (
           <div className="update-banner">
@@ -2946,8 +2969,8 @@ function App() {
                 >
                   {content === null ? (
                     <div className="editor-loading">Loading note…</div>
-                  ) : editorModeForNote === 'live' && wantShared && !sharedSession ? (
-                    <div className="editor-loading">Joining the shared note…</div>
+                  ) : editorModeForNote === 'live' && wantShared && !sharedMod ? (
+                    <div className="editor-loading">Loading live editor...</div>
                   ) : editorModeForNote === 'live' ? (
                     <EditorErrorBoundary
                       resetKey={`${selectedNs}/${currentPath}`}
@@ -2968,15 +2991,17 @@ function App() {
                             contains the moment-the-prop-was-empty (because we only
                             mount once content is a real string). */}
                         <LiveEditor
-                            key={sharedSession ? `${selectedNs}/${currentPath}#shared${sharedSession.id}` : `${selectedNs}/${currentPath}`}
+                            key={wantShared ? `${selectedNs}/${currentPath}#shared` : `${selectedNs}/${currentPath}`}
                             content={content}
+                            collabPlugin={wantShared && sharedMod ? sharedMod.collabPlugin : null}
                             shared={sharedSession}
-                            onChange={sharedSession ? handleSharedChange : (canWriteCurrent ? handleContentChange : null)}
-                            registerOutsideMerge={sharedSession ? undefined : registerOutsideMerge}
-                            // Shared: editable once the room's document is
-                            // bound. Typing into the unbound placeholder
-                            // would go nowhere.
-                            readOnly={!canWriteCurrent || (sharedSession && (!sharedBound || sharedDisabled))}
+                            sharedBound={sharedBound}
+                            onChange={sharedBound ? handleSharedChange : (canWriteCurrent ? handleContentChange : null)}
+                            registerOutsideMerge={registerOutsideMerge}
+                            // Editable at once: before the room is bound the
+                            // note saves the normal way. Read-only only
+                            // without write permission.
+                            readOnly={!canWriteCurrent || (sharedSession && sharedDisabled)}
                             ns={selectedNs}
                             currentPath={currentPath}
                             comments={commentsEnabled ? comments : []}

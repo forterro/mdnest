@@ -1,0 +1,462 @@
+// A Live note never waits for the shared-editing connection (LIVE-1).
+//
+// From v4.8.10 a note opened in Live stayed read-only until the room's shared
+// document arrived over the websocket. On a slow, sleeping or blocked
+// connection that was every note, and switching notes closed one websocket
+// and opened another, so each switch flashed "Reconnecting" and waited again.
+// v4.8.13's first fix waited 4 s and then showed a long notice. What is wanted:
+//
+//   (a) a note is editable at once even when the websocket hangs or is refused
+//   (b) switching notes never shows "Reconnecting" or a notice
+//   (c) one websocket for the whole visit, not one per note
+//   (d) editable quickly after a switch on a healthy connection
+//   (e) typing before the room is ready is kept, for both people
+//   (f) the connection dropping mid-edit: typing keeps working and saving,
+//       and the tab rejoins when the socket is back
+//   (g) opening a note and leaving it is not an unsaved edit on the server
+//   plus: an older backend (token-only socket refused) still edits, saves
+//   and shares through the per-note socket; and a room seeded from A's live
+//   document holds exactly A's markdown, for B and on disk.
+//
+// Live collaboration exists only in multi mode, so this runs from
+// tests/e2e-collab-multi.sh. Elsewhere it skips.
+import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const USER = process.env.MDNEST_USER || 'e2e';
+const PASS = process.env.MDNEST_PASSWORD || 'e2epass123';
+const USER2 = process.env.MDNEST_USER2 || '';
+const PASS2 = process.env.MDNEST_PASSWORD2 || '';
+const NOTES_DIR = process.env.MDNEST_NOTES_DIR || '';
+const BACKEND = process.env.MDNEST_BACKEND_CONTAINER || '';
+const NS = 'testing_workspace';
+// The budget for (d), editable after a switch on a healthy connection.
+const SWITCH_BUDGET_MS = Number(process.env.MDNEST_SWITCH_BUDGET_MS || 300);
+
+const WS = /\/api\/ws/;
+const EDITOR = '.editor-wrapper .ProseMirror';
+
+async function login(page, u, p) {
+  if (process.env.MDNEST_E2E_DEBUG) {
+    page.on('console', (m) => { if (/mdnest|shared|collab/i.test(m.text())) console.log(`[${u}] ${m.text()}`); });
+  }
+  // Live is the mode under test; the app reads this on load.
+  await page.addInitScript(() => { try { localStorage.setItem('mdnest_editor_mode', 'live'); } catch { /* ignore */ } });
+  await page.goto('/');
+  await page.fill('input[name=username]', u);
+  await page.fill('input[name=password]', p);
+  await page.click('button:has-text("Sign in")');
+  await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
+  const cfg = await page.evaluate(async () => (await fetch('/api/config')).json());
+  test.skip(!cfg.liveCollab || !cfg.sharedEditing, 'needs live collaboration and shared editing on (tests/e2e-collab-multi.sh)');
+}
+
+async function api(page, method, file, body) {
+  return page.evaluate(async ([m, u, b]) => {
+    const t = localStorage.getItem('mdnest_token');
+    const r = await fetch(u, { method: m, headers: { Authorization: 'Bearer ' + t }, body: b, cache: 'no-store' });
+    return { status: r.status, text: await r.text() };
+  }, [method, `/api/note?ns=${NS}&path=${encodeURIComponent(file)}`, body]);
+}
+
+async function makeNote(page, file, text) {
+  expect((await api(page, 'POST', file, text)).status).toBe(201);
+}
+
+async function readNote(page, file) {
+  if (NOTES_DIR) return fs.readFileSync(path.join(NOTES_DIR, NS, file), 'utf8');
+  return (await api(page, 'GET', file)).text;
+}
+
+// Navigates to a note through the address bar (a same-page navigation, like
+// clicking it in the tree) and returns how many milliseconds passed until the
+// Live editor showed that note's text AND accepted typing. Measured inside
+// the page, so Playwright's own round trips are not counted.
+async function openAndTime(page, file, marker, limitMs = 15_000) {
+  return page.evaluate(async ([hash, sel, mark, limit]) => {
+    const t0 = performance.now();
+    window.location.hash = hash;
+    return new Promise((resolve) => {
+      const tick = () => {
+        const el = document.querySelector(sel);
+        const ms = performance.now() - t0;
+        if (el && el.getAttribute('contenteditable') === 'true' && (el.textContent || '').includes(mark)) {
+          resolve(Math.round(ms));
+          return;
+        }
+        if (ms > limit) { resolve(-1); return; }
+        requestAnimationFrame(tick);
+      };
+      tick();
+    });
+  }, [`#${NS}/${file}`, EDITOR, marker, limitMs]);
+}
+
+// Records anything that looks like the connection status flickering or a
+// notice popping up, from now on. Read back with seenTrouble().
+async function watchTrouble(page) {
+  await page.evaluate(() => {
+    window.__mdnestTrouble = [];
+    const look = () => {
+      for (const el of document.querySelectorAll('.ws-status')) {
+        const t = (el.textContent || '').trim();
+        if (/Reconnecting|Offline|Not live/i.test(t)) window.__mdnestTrouble.push(`status: ${t}`);
+      }
+      for (const el of document.querySelectorAll('[data-testid=notice-bar]')) {
+        window.__mdnestTrouble.push(`notice: ${(el.textContent || '').trim().slice(0, 80)}`);
+      }
+      for (const el of document.querySelectorAll('.editor-readonly-bar')) {
+        window.__mdnestTrouble.push('read-only bar');
+      }
+    };
+    new MutationObserver(look).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+    look();
+  });
+}
+const seenTrouble = (page) => page.evaluate(() => [...new Set(window.__mdnestTrouble || [])]);
+
+// The editor's text without other people's cursor labels.
+const noteText = (page) => page.locator(EDITOR).evaluate((el) => {
+  const c = el.cloneNode(true);
+  c.querySelectorAll('.ProseMirror-yjs-cursor').forEach((n) => n.remove());
+  return c.innerText;
+});
+
+async function typeAfter(page, text, words) {
+  await page.locator(`${EDITOR} p`, { hasText: text }).first().click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(words, { delay: 15 });
+}
+
+// A websocket that works, but can be cut and restored on demand: while cut,
+// the open socket is closed and every new attempt is closed at once.
+async function cuttableSocket(page) {
+  const state = { cut: false, open: new Set() };
+  await page.routeWebSocket(WS, (ws) => {
+    if (state.cut) { ws.close({ code: 1006 }); return; }
+    const server = ws.connectToServer();
+    state.open.add(ws);
+    ws.onClose(() => { state.open.delete(ws); server.close(); });
+    server.onClose(() => { state.open.delete(ws); ws.close(); });
+    ws.onMessage((m) => server.send(m));
+    server.onMessage((m) => ws.send(m));
+  });
+  return {
+    cut() { state.cut = true; for (const ws of state.open) ws.close({ code: 1006 }); state.open.clear(); },
+    restore() { state.cut = false; },
+  };
+}
+
+// A websocket whose server side only starts answering after `delayMs`: what
+// a slow or sleepy connection looks like to the page.
+async function slowSocket(page, delayMs) {
+  await page.routeWebSocket(WS, (ws) => {
+    const queue = [];
+    let server = null;
+    ws.onMessage((m) => (server ? server.send(m) : queue.push(m)));
+    setTimeout(() => {
+      server = ws.connectToServer();
+      server.onMessage((m) => ws.send(m));
+      server.onClose(() => ws.close());
+      ws.onClose(() => server.close());
+      for (const m of queue) server.send(m);
+    }, delayMs);
+  });
+}
+
+const BROKEN = {
+  // The socket opens but nothing ever comes back.
+  hangs: (ws) => { ws.onMessage(() => {}); },
+  // The socket is closed as soon as it opens.
+  refused: (ws) => { ws.close({ code: 1006 }); },
+};
+
+for (const [how, handler] of Object.entries(BROKEN)) {
+  test(`(a) websocket ${how}: a Live note is editable within 1 s and saves`, async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.routeWebSocket(WS, handler);
+    await login(page, USER, PASS);
+    const file = `lnb-a-${how}-${Date.now()}.md`;
+    await makeNote(page, file, '# Broken socket\n\nhello there\n');
+    await watchTrouble(page);
+    try {
+      const ms = await openAndTime(page, file, 'hello there');
+      console.log(`RESULT (a) ${how}: editable after ${ms} ms`);
+      expect(ms, 'never became editable').toBeGreaterThanOrEqual(0);
+      expect(ms, 'took longer than 1 s to become editable').toBeLessThanOrEqual(1000);
+      await typeAfter(page, 'hello there', ' typed now');
+      await expect.poll(() => readNote(page, file), { timeout: 15_000 }).toContain('hello there typed now');
+      // "Not live" is right here; a notice or a read-only bar is not.
+      expect((await seenTrouble(page)).filter((t) => !t.startsWith('status:')), 'no notice and no read-only bar').toEqual([]);
+    } finally {
+      await api(page, 'DELETE', file);
+    }
+  });
+}
+
+test('(b)+(c)+(d) switching notes: one websocket, no flicker, editable fast', async ({ page }) => {
+  test.setTimeout(120_000);
+  const sockets = [];
+  page.on('websocket', (ws) => { if (WS.test(ws.url())) sockets.push(ws.url()); });
+  await login(page, USER, PASS);
+  const stamp = Date.now();
+  const files = [0, 1, 2, 3].map((i) => `lnb-switch-${stamp}-${i}.md`);
+  for (const [i, f] of files.entries()) await makeNote(page, f, `# Switch ${i}\n\nnote number ${i} body\n`);
+  try {
+    // First open loads the editor; it is not what (d) measures.
+    expect(await openAndTime(page, files[0], 'note number 0')).toBeGreaterThanOrEqual(0);
+    await expect(page.locator('.ws-status')).toContainText('Live', { timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    const before = sockets.length;
+    await watchTrouble(page);
+    const times = [];
+    for (const i of [1, 2, 3, 1, 0, 2]) {
+      const ms = await openAndTime(page, files[i], `note number ${i}`);
+      times.push(ms);
+      await page.waitForTimeout(700);
+    }
+    console.log(`RESULT (d) switch-to-editable ms: ${times.join(', ')} (budget ${SWITCH_BUDGET_MS})`);
+    console.log(`RESULT (c) websockets opened: ${sockets.length} (before switching: ${before})`);
+    expect(await seenTrouble(page), '(b) status flicker or notice during a switch').toEqual([]);
+    expect(sockets.length, '(c) one websocket for the visit').toBe(1);
+    for (const ms of times) {
+      expect(ms, '(d) never became editable').toBeGreaterThanOrEqual(0);
+      expect(ms, `(d) editable within ${SWITCH_BUDGET_MS} ms of a switch`).toBeLessThanOrEqual(SWITCH_BUDGET_MS);
+    }
+  } finally {
+    for (const f of files) await api(page, 'DELETE', f);
+  }
+});
+
+test('(e) one person types while the other opens on a slow connection: nothing lost', async ({ browser }) => {
+  test.setTimeout(150_000);
+  if (!USER2) test.skip(true, 'needs MDNEST_USER2 (tests/e2e-collab-multi.sh)');
+  const a = await browser.newContext();
+  const b = await browser.newContext();
+  const pageA = await a.newPage();
+  const pageB = await b.newPage();
+  await login(pageA, USER, PASS);
+  await slowSocket(pageB, 2500);
+  await login(pageB, USER2, PASS2);
+  const file = `lnb-e-${Date.now()}.md`;
+  await makeNote(pageA, file, '# Together\n\nalice line\n\nbob line\n');
+  try {
+    expect(await openAndTime(pageA, file, 'alice line')).toBeGreaterThanOrEqual(0);
+    await pageA.waitForTimeout(1500); // A seeds the room and saves for it
+    await typeAfter(pageA, 'alice line', '');
+    const aliceWords = ['amber1', 'amber2', 'amber3', 'amber4', 'amber5', 'amber6'];
+    const aliceTyping = (async () => {
+      for (const w of aliceWords) {
+        await pageA.keyboard.type(` ${w}`, { delay: 30 });
+        await pageA.waitForTimeout(400);
+      }
+    })();
+    // B opens while A types, and types straight away: B's socket only
+    // starts answering 2.5 s later.
+    const ms = await openAndTime(pageB, file, 'bob line', 5000);
+    console.log(`RESULT (e) B editable after ${ms} ms on a slow socket`);
+    expect(ms, 'B could not type before the room was ready').toBeGreaterThanOrEqual(0);
+    expect(ms).toBeLessThanOrEqual(1000);
+    await typeAfter(pageB, 'bob line', ' basil1 basil2');
+    await aliceTyping;
+
+    const all = [...aliceWords, 'basil1', 'basil2'];
+    await expect.poll(async () => {
+      const disk = await readNote(pageA, file);
+      return all.filter((w) => !disk.includes(w));
+    }, { timeout: 25_000, message: 'words missing on disk' }).toEqual([]);
+    for (const p of [pageA, pageB]) {
+      await expect.poll(async () => {
+        const t = await p.locator(EDITOR).innerText();
+        return all.filter((w) => !t.includes(w));
+      }, { timeout: 15_000, message: 'words missing from an editor' }).toEqual([]);
+    }
+    // Both are in the room: A's typing reaches B's screen live, well before
+    // any save-and-poll could carry it.
+    await typeAfter(pageA, 'basil2', ' livecheck');
+    await expect(pageB.locator(EDITOR)).toContainText('livecheck', { timeout: 2000 });
+    const disk = await readNote(pageA, file);
+    expect(disk.split('amber1').length - 1, 'a word was duplicated').toBe(1);
+    expect(disk.split('basil1').length - 1, 'a word was duplicated').toBe(1);
+  } finally {
+    await api(pageA, 'DELETE', file);
+    await a.close(); await b.close();
+  }
+});
+
+test('(f) the connection drops mid-edit: typing keeps saving, and it rejoins', async ({ browser }) => {
+  test.setTimeout(150_000);
+  if (!USER2) test.skip(true, 'needs MDNEST_USER2 (tests/e2e-collab-multi.sh)');
+  const a = await browser.newContext();
+  const b = await browser.newContext();
+  const pageA = await a.newPage();
+  const pageB = await b.newPage();
+  const sock = await cuttableSocket(pageA);
+  await login(pageA, USER, PASS);
+  await login(pageB, USER2, PASS2);
+  const file = `lnb-f-${Date.now()}.md`;
+  await makeNote(pageB, file, '# Drop\n\nfirst line\n\nsecond line\n');
+  try {
+    // B opens first, so B is the room's saver; A is only a member.
+    expect(await openAndTime(pageB, file, 'first line')).toBeGreaterThanOrEqual(0);
+    await pageB.waitForTimeout(1500);
+    expect(await openAndTime(pageA, file, 'first line')).toBeGreaterThanOrEqual(0);
+    await expect(pageA.locator('.presence-bar')).toBeVisible({ timeout: 20_000 });
+    await typeAfter(pageA, 'first line', ' online1');
+    await expect(pageB.locator(EDITOR)).toContainText('online1', { timeout: 5000 });
+
+    sock.cut();
+    await typeAfter(pageA, 'second line', ' offline1 offline2');
+    await expect(pageA.locator(EDITOR)).toContainText('offline2');
+    await expect.poll(() => readNote(pageA, file), { timeout: 15_000, message: 'typing while the socket is down was not saved' })
+      .toContain('offline1 offline2');
+
+    sock.restore();
+    await expect(pageA.locator('.ws-status')).toContainText('Live', { timeout: 40_000 });
+    await expect(pageB.locator(EDITOR)).toContainText('offline2', { timeout: 15_000 });
+    await typeAfter(pageA, 'offline2', ' rejoined');
+    await expect(pageB.locator(EDITOR)).toContainText('rejoined', { timeout: 2000 });
+    await expect.poll(() => readNote(pageA, file), { timeout: 15_000 }).toContain('rejoined');
+    const disk = await readNote(pageA, file);
+    for (const w of ['online1', 'offline1', 'offline2', 'rejoined']) {
+      expect(disk.split(w).length - 1, `${w} once on disk`).toBe(1);
+    }
+  } finally {
+    await api(pageB, 'DELETE', file);
+    await a.close(); await b.close();
+  }
+});
+
+test('(g) opening a note and leaving it leaves no unsaved updates on the server', async ({ page }) => {
+  test.setTimeout(90_000);
+  test.skip(!BACKEND, 'needs MDNEST_BACKEND_CONTAINER to read the backend log (tests/e2e-collab-multi.sh)');
+  await login(page, USER, PASS);
+  const stamp = Date.now();
+  const files = [0, 1, 2].map((i) => `lnb-g-${stamp}-${i}.md`);
+  // Front matter, headings, a list, a task list, a table, code, a diagram, an
+  // image and a wikilink: blocks the editor adds attributes to, renders
+  // late, or writes back differently. None of that is an edit.
+  const body = (i) => `---\ntitle: Leave ${i}\n---\n\n# Leave ${i}\n\n## Part\n\n* one\n* two\n\n- [ ] task\n- [x] done\n\n`
+    + '| a | b |\n|---|---|\n| 1 | 2 |\n\n```js\nconst x = 1;\n```\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\n'
+    + `![pic](missing.png)\n\nsee [[Other note]]\n\nopen and leave ${i}\n`;
+  for (const [i, f] of files.entries()) await makeNote(page, f, body(i));
+  const created = [];
+  for (const f of files) created.push(await readNote(page, f));
+  // The note the warning was seen on (v4.8.10, the test server): a heading,
+  // a line of prose and tagged task lines.
+  const fixture = `lnb-g-${stamp}-module.md`;
+  const fixtureText = fs.readFileSync(path.join(__dirname, 'fixtures', 'module-092.md'), 'utf8');
+  await makeNote(page, fixture, fixtureText);
+  const fixtureOnDisk = await readNote(page, fixture);
+  files.unshift(fixture);
+  try {
+    // The fixture for a while, then a long stay, a short one, and leaving
+    // the moment the note is editable.
+    const marks = ['Some prose about this module', 'open and leave 0', 'open and leave 1', 'open and leave 2'];
+    for (const [i, f] of files.entries()) {
+      expect(await openAndTime(page, f, marks[i])).toBeGreaterThanOrEqual(0);
+      await page.waitForTimeout([6000, 2500, 400, 0][i]);
+    }
+    await page.evaluate(() => { window.location.hash = '#'; });
+    await page.waitForTimeout(2500);
+    // The backend logs to stderr.
+    const logs = execFileSync('sh', ['-c', 'docker logs "$0" 2>&1', BACKEND], { encoding: 'utf8', maxBuffer: 64 << 20 });
+    const bad = logs.split('\n').filter((l) => l.includes(`lnb-g-${stamp}`) && /unsaved updates/.test(l));
+    expect(bad, 'the server kept a room with unsaved updates after open-and-leave').toEqual([]);
+    // The server adds the note's id marker when the app first looks the note
+    // up (comments are keyed by it); that is not the editor writing.
+    const unmarked = (t) => t.replace(/\n*<!-- mdnest:[0-9a-f-]+ -->\n*/g, '\n').trimEnd();
+    expect(unmarked(await readNote(page, fixture)), 'opening the note rewrote it').toBe(unmarked(fixtureOnDisk));
+    for (const [i, f] of files.slice(1).entries()) {
+      expect(unmarked(await readNote(page, f)), 'opening the note rewrote it').toBe(unmarked(created[i]));
+    }
+  } finally {
+    for (const f of files) await api(page, 'DELETE', f);
+  }
+});
+
+test('an older backend that refuses the token-only socket: the per-note socket still works', async ({ browser }) => {
+  test.setTimeout(150_000);
+  if (!USER2) test.skip(true, 'needs MDNEST_USER2 (tests/e2e-collab-multi.sh)');
+  const a = await browser.newContext();
+  const b = await browser.newContext();
+  const pageA = await a.newPage();
+  const pageB = await b.newPage();
+  // What a backend before v4.8.13 does with /api/ws?token= alone: refuse it.
+  const oldServer = (ws) => {
+    if (!/[?&]ns=/.test(ws.url())) { ws.close({ code: 1008 }); return; }
+    const server = ws.connectToServer();
+    ws.onMessage((m) => server.send(m));
+    server.onMessage((m) => ws.send(m));
+    ws.onClose(() => server.close());
+    server.onClose(() => ws.close());
+  };
+  await pageA.routeWebSocket(WS, oldServer);
+  await pageB.routeWebSocket(WS, oldServer);
+  await login(pageA, USER, PASS);
+  await login(pageB, USER2, PASS2);
+  const stamp = Date.now();
+  const file = `lnb-old-${stamp}.md`;
+  const other = `lnb-old-${stamp}-2.md`;
+  await makeNote(pageA, file, '# Old server\n\nfirst line\n');
+  await makeNote(pageA, other, '# Other\n\nother line\n');
+  try {
+    const ms = await openAndTime(pageA, file, 'first line');
+    expect(ms).toBeGreaterThanOrEqual(0);
+    expect(ms).toBeLessThanOrEqual(1000);
+    await expect(pageA.locator('.ws-status')).toContainText('Live', { timeout: 15_000 });
+    expect(await openAndTime(pageB, file, 'first line')).toBeGreaterThanOrEqual(0);
+    await expect(pageA.locator('.presence-bar')).toBeVisible({ timeout: 20_000 });
+    await typeAfter(pageA, 'first line', ' oldsrv');
+    await expect(pageB.locator(EDITOR)).toContainText('oldsrv', { timeout: 10_000 });
+    await expect.poll(() => readNote(pageA, file), { timeout: 15_000 }).toContain('first line oldsrv');
+    // A switch on the per-note socket.
+    expect(await openAndTime(pageA, other, 'other line')).toBeGreaterThanOrEqual(0);
+    await typeAfter(pageA, 'other line', ' switched');
+    await expect.poll(() => readNote(pageA, other), { timeout: 15_000 }).toContain('other line switched');
+  } finally {
+    await api(pageA, 'DELETE', file);
+    await api(pageA, 'DELETE', other);
+    await a.close(); await b.close();
+  }
+});
+
+test('a room seeded from the live editor holds exactly the markdown, for the other person and on disk', async ({ browser }) => {
+  test.setTimeout(150_000);
+  if (!USER2) test.skip(true, 'needs MDNEST_USER2 (tests/e2e-collab-multi.sh)');
+  const a = await browser.newContext();
+  const b = await browser.newContext();
+  const pageA = await a.newPage();
+  const pageB = await b.newPage();
+  await login(pageA, USER, PASS);
+  await login(pageB, USER2, PASS2);
+  const file = `lnb-seed-${Date.now()}.md`;
+  await makeNote(pageA, file, '---\ntitle: Seed\ntags: [x]\n---\n\n# Seed heading\n\n## Second heading\n\n- [ ] a task\n\nplain line\n');
+  try {
+    // A types before and after the room is there; the room is seeded from
+    // A's document as it is.
+    expect(await openAndTime(pageA, file, 'plain line')).toBeGreaterThanOrEqual(0);
+    await typeAfter(pageA, 'plain line', ' added');
+    await pageA.waitForTimeout(1500);
+    await typeAfter(pageA, 'added', ' more');
+    await expect.poll(() => readNote(pageA, file), { timeout: 15_000 }).toContain('plain line added more');
+    const saved = await readNote(pageA, file);
+    // The front matter exactly as it was, the headings as written, nothing
+    // the editor adds (heading ids) in the file.
+    expect(saved.startsWith('---\ntitle: Seed\ntags: [x]\n---\n\n# Seed heading\n\n## Second heading\n\n'), saved).toBe(true);
+    expect(saved).not.toMatch(/\{#|id=/);
+    expect(await openAndTime(pageB, file, 'plain line added more')).toBeGreaterThanOrEqual(0);
+    await expect(pageA.locator('.presence-bar')).toBeVisible({ timeout: 20_000 });
+    const textA = await noteText(pageA);
+    await expect.poll(() => noteText(pageB), { timeout: 10_000 }).toBe(textA);
+    // B being there does not rewrite it.
+    await pageB.waitForTimeout(2500);
+    expect(await readNote(pageA, file)).toBe(saved);
+    expect(textA).not.toContain('title: Seed');
+  } finally {
+    await api(pageA, 'DELETE', file);
+    await a.close(); await b.close();
+  }
+});
