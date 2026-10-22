@@ -4,7 +4,13 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.12 (in progress)
+## v4.8.12: No lost chat messages on HA installs, and Go 1.26.10
+
+Two important fixes. On HA installs (app replicas and one writer), appends
+arriving close together could lose a message on disk although it was
+accepted; agent chats hit this most. And the backend is now built with Go
+1.26.10, which fixes a certificate check in `crypto/x509`. Upgrading is
+strongly recommended for HA installs and recommended for everyone else.
 
 ### Release process
 
