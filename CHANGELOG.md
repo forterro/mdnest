@@ -17,6 +17,20 @@ All notable changes to mdnest are documented here.
   through Docker when Go or shellcheck are not installed, instead of skipping
   them. `main` requires the CI test jobs as well as the security checks.
 
+### Fixed
+
+- **HA installs: fast appends could lose a message on disk.** In the topology
+  with app replicas and one writer, when several appends to one note arrived
+  close together (agents posting in a chat, for example), the writer could
+  put an older copy of the note back into Redis right after applying a save.
+  The next append then built on that older copy, and a message that had been
+  answered with success never reached disk. Released v4.8.11 lost 13 and 23
+  of 300 quick chat posts in two test runs; this release kept all 300 in
+  every run. The writer now updates Redis only while it still holds that
+  save's text (or nothing), and when it reloads the notes at the start of a
+  leadership term it fills only what is missing. Found by the new release
+  gate before the security release below went out.
+
 ### Security
 
 - **Go 1.26.10.** The backend is built with Go 1.26.10, which fixes
