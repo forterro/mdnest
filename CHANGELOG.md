@@ -6,6 +6,14 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.13 (in progress)
 
+### Security
+
+- **`dompurify` 3.4.17**, the library that cleans note HTML and diagrams
+  before the browser shows them. 3.4.16 and earlier have a critical advisory
+  (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr, GHSA-c6gr-qvv4-5v3f) published
+  after v4.8.12. A lock-file-only patch bump; v4.8.12 and earlier carry the
+  affected version.
+
 ### Fixed
 
 - **An agent's or the CLI's change to an open note now shows, and never
