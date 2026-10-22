@@ -19,11 +19,11 @@
 #      backend-image-init, e2e-browser
 #   2. Go vet + go test -race WITH a real Redis (host Go, else Docker), so the
 #      durability-queue tests run instead of skipping
-#   3. the browser suite again with live collaboration off (the default
-#      install), then shellcheck (host, else Docker)
-#   4. the suites the changed files call for, compared with origin/main:
+#   3. shellcheck (host, else Docker)
+#   4. e2e-collab-multi.sh always (live collaboration only runs in multi
+#      mode), and the suites the changed files call for, compared with
+#      origin/main:
 #        backend/storage, deploy/helm, factory     -> e2e-ha-durability.sh
-#        collab, save paths, Live editor, App.jsx  -> e2e-collab-multi.sh
 #        chat members, permission middleware       -> e2e-private-chats-multi.sh
 #        transfer, download                        -> e2e-transfer-multi.sh
 #      MDNEST_GATE_ALL=1 runs all four whatever changed.
@@ -97,13 +97,6 @@ go_suite() {
 }
 run "Go vet + go test -race, with Redis" go.log go_suite
 
-# 2b. The browser suite again on a DEFAULT install: live collaboration off.
-# It is off unless an operator turns it on, so most installs run this way, yet
-# until v4.8.13 no suite ever did, and an agent's change to an open note could
-# go unseen or lose the person's typing there without any test noticing.
-default_install_browser() { MDNEST_E2E_LIVE_COLLAB=false bash tests/e2e-browser.sh; }
-run "browser suite on a default install (live collaboration off)" browser-default.log default_install_browser
-
 # 3. shellcheck, the same files and severity as CI.
 SC_FILES=(setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh)
 shellcheck_suite() {
@@ -123,7 +116,10 @@ optional() { # pattern, script, why
   fi
 }
 optional '^backend/storage/|^deploy/helm/|^backend/main\.go' e2e-ha-durability.sh "HA writer, queue, leader"
-optional '^backend/collab/|^backend/handlers/notes|^frontend/src/(shared|LiveEditor|App\.jsx|echo-gate|components/LiveEditor)' e2e-collab-multi.sh "shared editing and saves"
+# Always: live collaboration and shared editing exist only in multi mode, so
+# this is the only suite that runs them, and a lockout of every Live note
+# (v4.8.10 to v4.8.12, behind a proxy) needed no change to any file above.
+run "e2e-collab-multi.sh (live collaboration and shared editing, multi mode)" e2e-collab-multi.sh.log bash tests/e2e-collab-multi.sh
 optional 'chat_members|^backend/middleware/permission|^backend/store/chat' e2e-private-chats-multi.sh "private chats"
 optional '^backend/handlers/(transfer|download|treecopy)' e2e-transfer-multi.sh "move, copy, download"
 

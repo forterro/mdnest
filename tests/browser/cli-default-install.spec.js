@@ -4,12 +4,10 @@
 // note open never saw it, or got a conflict banner and lost their own typing.
 //
 // The change is made through the API the way the CLI's append does it
-// (PATCH /api/note). Run with live collaboration off:
-//
-//   MDNEST_E2E_LIVE_COLLAB=false MDNEST_E2E_SPECS=cli-default-install.spec.js bash tests/e2e-browser.sh
-//
-// The release gate runs it that way. With live collaboration on it skips:
-// those installs are covered by collab-cli.spec.js and cli-vs-typing.spec.js.
+// (PATCH /api/note). Runs in tests/e2e-browser.sh, which is single mode, and
+// live collaboration only ever runs in multi mode. With live collaboration on
+// it skips: those installs are covered by collab-cli.spec.js and
+// cli-vs-typing.spec.js in tests/e2e-collab-multi.sh.
 import { test, expect } from '@playwright/test';
 
 const USER = process.env.MDNEST_USER || 'e2e';

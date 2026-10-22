@@ -83,6 +83,9 @@ import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
 // them (no live collaboration): the CLI, agents, git-sync. A 304 when nothing
 // changed, so the check is cheap.
 const NOTE_POLL_MS = 5000;
+// How long a Live note waits for its shared document before editing the
+// normal way instead.
+const SHARED_BIND_WAIT_MS = 4000;
 import {
   getToken,
   getNote,
@@ -629,8 +632,13 @@ function App() {
   // someone else is in the note it switches to Live, because a textarea
   // saving its own copy would fight the room.
   const sharedEditingOn = !!appConfig?.sharedEditing;
+  // Set for the rest of this page visit when a shared document never arrived:
+  // a proxy, CDN or network that refuses websockets, or accepts them and
+  // passes nothing. Notes then edit and save the normal way (which merges
+  // outside changes) instead of sitting read-only. Reload to try again.
+  const [sharedUnavailable, setSharedUnavailable] = useState(false);
   const noteLoaded = content !== null;
-  const sharedEligible = sharedEditingOn && noteLoaded
+  const sharedEligible = sharedEditingOn && !sharedUnavailable && noteLoaded
     && isSharedEligible({ path: currentPath, isDrawing: isDrawingDoc, isChat: chatNoteActive, isMarp: marpActive });
   const othersInNote = presenceUsers.some((u) => u.id !== userInfo?.id);
   const sharedForcesLive = sharedEligible && othersInNote && liveCrashedFor !== currentPath;
@@ -1135,14 +1143,25 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharedKey, canWriteCurrent]);
 
-  // The editor stays read-only until the shared document arrives. If the
-  // live connection is down that never happens, so say why and what works.
+  // The editor is read-only until the shared document arrives. When it has
+  // not arrived within a few seconds, stop waiting: edit and save the normal
+  // way for the rest of this visit. Before v4.8.13 the note stayed read-only
+  // for good, and behind a proxy that does not pass websockets that was
+  // nearly every note (reported by a user; see shared-unavailable.spec.js).
+  // The unbound session is never the saver, so ending it writes nothing.
   useEffect(() => {
     if (!sharedSession || sharedBound || sharedDisabled) return undefined;
-    const t = setTimeout(() => setNotice({
-      kind: 'error',
-      text: 'Waiting for the live connection to edit this note together. Basic mode works without it.',
-    }), 6000);
+    const t = setTimeout(() => {
+      const why = sharedSession.whyUnbound?.() || 'unknown';
+      console.warn(`mdnest: shared editing did not start for this note (${why}); editing the normal way instead`);
+      setSharedUnavailable(true);
+      setNotice({
+        kind: 'info',
+        text: why === 'no-connection' || why === 'no-reply' || why === 'no-hello'
+          ? `Editing together needs a live connection, and this browser can't get one right now (${why}; often a proxy that does not pass websockets both ways). Your notes save the normal way. Reload to try again.`
+          : `Editing together could not start for this note (${why}). Your notes save the normal way. Reload to try again.`,
+      });
+    }, SHARED_BIND_WAIT_MS);
     return () => clearTimeout(t);
   }, [sharedSession, sharedBound, sharedDisabled]);
 
