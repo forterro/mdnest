@@ -83,6 +83,14 @@ All notable changes to mdnest are documented here.
   that text with its own could drop words. Reading a note now waits for a
   save of that same note to finish.
 
+- **Your own newest typing could vanish from the screen when the note was
+  checked for outside changes** (also in v4.8.12 and earlier). The 5 second
+  check, and the reload after someone else's save, compared the answer with
+  the text saved last, read after the answer came back. When a save of yours
+  landed while the check was out, the older answer looked like a change and
+  rolled your newest words back. A check now ignores an answer that a save of
+  yours overtook.
+
 ### Tests
 
 - New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)

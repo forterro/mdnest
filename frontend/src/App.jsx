@@ -941,14 +941,20 @@ function App() {
       const ns = selectedNsRef.current;
       const path = currentPathRef.current;
       if (ns && path) {
+        // The base is what we had saved BEFORE asking: if a save of ours
+        // lands while the request is out, the answer may be older than it,
+        // and merging that would roll our own typing back. Skip it then;
+        // our save was checked against the server's version anyway.
+        const base = savedContentRef.current;
+        const etagBefore = etagRef.current;
         getNote(ns, path).then(async ({ text, etag }) => {
           if (selectedNsRef.current !== ns || currentPathRef.current !== path) return;
           // Through the editor's own merge, like the note poll: "no local
           // edits" is judged from the app's copy, which the Live editor
           // reports late, so replacing the text outright dropped keystrokes
           // typed just after a save (live-never-blocks.spec.js (h)).
-          const base = savedContentRef.current;
           const { mergeThreeWay } = await import('./sharedText.js');
+          if (savedContentRef.current !== base || etagRef.current !== etagBefore) return;
           if (selectedNsRef.current === ns && currentPathRef.current === path) {
             savedContentRef.current = text;
             setSavedContent(text);
@@ -1393,18 +1399,23 @@ function App() {
       // A shared note's saver checks the file itself (file-changed, and on
       // every 409); reloading here would replace the room's text.
       if (sharedBoundRef.current || document.hidden) return;
+      // What we had saved before asking (see handleFileChanged).
+      const base = savedContentRef.current;
+      const etagBefore = etagRef.current;
       try {
-        const got = await getNote(selectedNs, currentPath, { ifNoneMatch: etagRef.current });
+        const got = await getNote(selectedNs, currentPath, { ifNoneMatch: etagBefore });
 
         // STALE CHECK: if user switched files while getNote was in flight, discard
         if (pollPathRef.current !== myPollKey || got.notModified) return;
+        // A save of ours landed while asking: the answer may be older.
+        if (savedContentRef.current !== base || etagRef.current !== etagBefore) return;
         const { text: remote, etag } = got;
         if (remote === savedContentRef.current) { etagRef.current = etag; return; }
 
         if (!hasLocalEdits()) {
-          const base = savedContentRef.current;
           const { mergeThreeWay } = await import('./sharedText.js');
           if (pollPathRef.current !== myPollKey) return;
+          if (savedContentRef.current !== base || etagRef.current !== etagBefore) return;
           savedContentRef.current = remote;
           setSavedContent(remote);
           remoteLiveRef.current = null;
