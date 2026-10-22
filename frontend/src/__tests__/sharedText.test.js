@@ -136,6 +136,30 @@ describe('mergeThreeWay: one side is the other plus more', () => {
     const file = '# Note\n\nline for alice roomA more\n\nline for bob\n';
     expect(mergeThreeWay(base, room, file)).toBe('# Note\n\nline for alice roomA more\n\nline for bob\n\nadded by carol\n');
   });
+  it('never brings back a line one side deleted: keeps both instead', () => {
+    // We deleted "c", they added "d". Theirs is ours plus insertions, but
+    // ours is not the base plus insertions, so taking theirs would resurrect
+    // "c" without a word.
+    const report = {};
+    const out = mergeThreeWay('a b c\n', 'a b\n', 'a b c d\n', report);
+    expect(out).toContain('a b\n');
+    expect(out).toContain('a b c d\n');
+    expect(report.conflicts).toBe(1);
+  });
+  it('does not count a dropped trailing space as a deletion', () => {
+    // Saved mid-typing with the space, written back by the editor without.
+    const out = mergeThreeWay('x a1 \n', 'x a1\n', 'x a1 a2\n');
+    expect(out).toBe('x a1 a2\n');
+  });
+  it('takes the longer side when both only added to the base', () => {
+    expect(mergeThreeWay('x\n', 'x one\n', 'x one two\n')).toBe('x one two\n');
+    expect(mergeThreeWay('x\n', 'x one two\n', 'x one\n')).toBe('x one two\n');
+  });
+  it('keeps both when both only added, but different things', () => {
+    const out = mergeThreeWay('x\n', 'x mine\n', 'x theirs\n');
+    expect(out).toContain('x mine');
+    expect(out).toContain('x theirs');
+  });
   it('keeps both when each side removed something the other kept', () => {
     const out = mergeThreeWay('a b c\n', 'a c mine\n', 'a b theirs\n');
     expect(out).toContain('a c mine');

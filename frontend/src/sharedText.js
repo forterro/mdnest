@@ -14,8 +14,9 @@ export { splitFrontMatter, joinFrontMatter } from './frontMatter.js';
 // diff3: `base` is the text the room last saved or loaded, `ours` what the
 // room has now, `theirs` the file on disk. A part changed on one side takes
 // that side; a part changed the same way on both sides is taken once; a part
-// where one side is the other side plus more (only insertions between them)
-// takes the larger one, since keeping both would show the shared words twice;
+// where both sides only added to the base and one added the other's text
+// plus more takes the longer one, since keeping both would show the shared
+// words twice;
 // a part changed differently on both keeps both, ours first, so nobody's
 // words are dropped.
 //
@@ -55,9 +56,11 @@ function splitLines(s) {
 
 const sameLines = (x, y) => x.length === y.length && x.every((l, i) => l === y[i]);
 
-// Whether `more` is `less` with only insertions (character diff, no deletes).
+// Whether `more` is `less` with only insertions (character diff). Removed
+// whitespace does not count: the Live editor reports a trailing space while
+// it is typed and drops it when it writes the paragraph back.
 function onlyAdds(dmp, less, more) {
-  return dmp.diff_main(less, more, false).every(([op]) => op !== -1);
+  return dmp.diff_main(less, more, false).every(([op, text]) => op !== -1 || !/\S/.test(text));
 }
 
 // report, when given, gets `conflicts`: how many places both sides changed
@@ -90,9 +93,13 @@ export function mergeThreeWay(base, ours, theirs, report) {
     if (sameLines(a, b)) out.push(...c);
     else if (sameLines(a, c)) out.push(...b);
     else if (sameLines(b, c)) out.push(...b);
-    else if (onlyAdds(dmp, b.join(''), c.join(''))) out.push(...c);
-    else if (onlyAdds(dmp, c.join(''), b.join(''))) out.push(...b);
-    else {
+    else if (onlyAdds(dmp, a.join(''), b.join('')) && onlyAdds(dmp, a.join(''), c.join(''))
+      && (onlyAdds(dmp, b.join(''), c.join('')) || onlyAdds(dmp, c.join(''), b.join('')))) {
+      // Both only added to the base, and one added more of the same: the
+      // longer one, once. (Only then: if a side deleted something, taking
+      // the longer one could bring the deleted text back.)
+      out.push(...(onlyAdds(dmp, b.join(''), c.join('')) ? c : b));
+    } else {
       if (report) report.conflicts += 1;
       out.push(...b);
       // Keep both versions readable as separate lines.
