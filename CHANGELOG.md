@@ -76,6 +76,13 @@ All notable changes to mdnest are documented here.
   longer drops the last keystrokes typed just after a save when someone
   else saves the same note.
 
+- **A note read while it was being saved could come back empty or cut
+  short** (also in v4.8.12 and earlier). A save writes the file in place, and
+  reading a note did not wait for a save in progress, so the browser, the
+  CLI or an agent could get a half-written note. A browser that then merged
+  that text with its own could drop words. Reading a note now waits for a
+  save of that same note to finish.
+
 ### Tests
 
 - New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)
