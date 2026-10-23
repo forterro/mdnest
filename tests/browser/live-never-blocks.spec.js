@@ -169,21 +169,24 @@ async function cuttableSocket(page) {
   };
 }
 
-// A websocket whose server side only starts answering after `delayMs`: what
-// a slow or sleepy connection looks like to the page.
-async function slowSocket(page, delayMs) {
+// A websocket whose server side starts answering only when release() is
+// called: a connection that is not there yet, for as long as the spec needs.
+async function heldSocket(page) {
+  let open;
+  const go = new Promise((r) => { open = r; });
   await page.routeWebSocket(WS, (ws) => {
     const queue = [];
     let server = null;
     ws.onMessage((m) => (server ? server.send(m) : queue.push(m)));
-    setTimeout(() => {
+    go.then(() => {
       server = ws.connectToServer();
       server.onMessage((m) => ws.send(m));
       server.onClose(() => ws.close());
       ws.onClose(() => server.close());
       for (const m of queue) server.send(m);
-    }, delayMs);
+    });
   });
+  return { release: () => open() };
 }
 
 const BROKEN = {
@@ -260,28 +263,35 @@ test('(e) one person types while the other opens on a slow connection: nothing l
   const pageA = await a.newPage();
   const pageB = await b.newPage();
   await login(pageA, USER, PASS);
-  await slowSocket(pageB, 2500);
+  const bSocket = await heldSocket(pageB);
   await login(pageB, USER2, PASS2);
   const file = `lnb-e-${Date.now()}.md`;
+  const warm = `lnb-e-warm-${Date.now()}.md`;
   await makeNote(pageA, file, '# Together\n\nalice line\n\nbob line\n');
+  await makeNote(pageB, warm, '# Warm\n\nwarm line\n');
+  let aliceTyping = Promise.resolve();
   try {
+    // B's editor code is loaded on another note first: the open measured
+    // below is about the connection, not a cold page.
+    expect(await openAndTime(pageB, warm, 'warm line')).toBeGreaterThanOrEqual(0);
     expect(await openAndTime(pageA, file, 'alice line')).toBeGreaterThanOrEqual(0);
     await pageA.waitForTimeout(1500); // A seeds the room and saves for it
     await typeAfter(pageA, 'alice line', '');
     const aliceWords = ['amber1', 'amber2', 'amber3', 'amber4', 'amber5', 'amber6'];
-    const aliceTyping = (async () => {
+    aliceTyping = (async () => {
       for (const w of aliceWords) {
         await pageA.keyboard.type(` ${w}`, { delay: 30 });
         await pageA.waitForTimeout(400);
       }
     })();
-    // B opens while A types, and types straight away: B's socket only
-    // starts answering 2.5 s later.
+    // B opens while A types, and types straight away, while B's socket is
+    // still not answering; it does once B has typed.
     const ms = await openAndTime(pageB, file, 'bob line', 5000);
     console.log(`RESULT (e) B editable after ${ms} ms on a slow socket`);
     expect(ms, 'B could not type before the room was ready').toBeGreaterThanOrEqual(0);
     expect(ms).toBeLessThanOrEqual(OPEN_BUDGET_MS);
     await typeAfter(pageB, 'bob line', ' basil1 basil2');
+    bSocket.release();
     await aliceTyping;
 
     const all = [...aliceWords, 'basil1', 'basil2'];
@@ -306,7 +316,12 @@ test('(e) one person types while the other opens on a slow connection: nothing l
     expect(disk.split('amber1').length - 1, 'a word was duplicated').toBe(1);
     expect(disk.split('basil1').length - 1, 'a word was duplicated').toBe(1);
   } finally {
+    bSocket.release();
+    // A failure above must not be hidden by A still typing into a page
+    // that is being closed.
+    await aliceTyping.catch(() => {});
     await api(pageA, 'DELETE', file);
+    await api(pageA, 'DELETE', warm);
     await a.close(); await b.close();
   }
 });
