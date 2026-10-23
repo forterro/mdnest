@@ -4,6 +4,115 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.13 (in progress)
+
+### Security
+
+- **`dompurify` 3.4.17**, the library that cleans note HTML and diagrams
+  before the browser shows them. 3.4.16 and earlier have a critical advisory
+  (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr, GHSA-c6gr-qvv4-5v3f) published
+  after v4.8.12. A lock-file-only patch bump; v4.8.12 and earlier carry the
+  affected version.
+
+### Fixed
+
+- **An agent's or the CLI's change to an open note now shows, and never
+  costs the person their typing, on a default install.** With live
+  collaboration off (the default), the browser only checked an open note
+  once a minute, so a change made with `mdnest append` or by an agent could
+  sit unseen for that long. Worse, if the person was typing, their next save
+  was refused, a "modified by an external source" banner appeared, and what
+  they typed after that was lost on reload. Now:
+  - the open note is checked every 5 seconds (an unchanged note costs a
+    304, no body), and an idle note shows the change straight away;
+  - a save that was overtaken is merged with the outside change and saved
+    again, in Basic and Live, so both are kept and the caret stays where the
+    person is typing;
+  - where both changed the same line, both versions are kept and a small
+    notice says so.
+- **"+ Note", "+ Folder", "+ Drawing" and "+ Slides" did nothing when
+  clicked during startup**, before a namespace was chosen. They are disabled
+  until then.
+
+- **Live notes could stay read-only for good, behind a proxy or network
+  that does not pass websockets** (reported by a user; every note showed
+  "Waiting for the live connection to edit this note together"). Since
+  shared editing (v4.8.10) a Live note waits for its shared document over
+  the websocket, and when that never came the note never unlocked. Now a
+  note waits at most 4 seconds, then edits and saves the normal way for the
+  rest of the visit, and a notice says which step failed (no connection, no
+  reply from the server, editor not attached), so the cause can be found.
+  Every later note opens editable at once.
+
+### Tests
+
+- New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)
+  and `shared-unavailable.spec.js` (a websocket that hangs or is refused;
+  both cases left the note read-only on v4.8.12). The release gate now runs
+  the multi-mode shared-editing suite on every release.
+- `tree-target.spec.js` removes what it creates; it left folders at the
+  namespace root and failed 2 times in 20 on repeated runs.
+
+### Release process
+
+- **A release push takes seconds.** The pre-push hook checks the release
+  gate's record before anything else: a tree the gate passed is accepted at
+  once, any other tree is refused at once. It used to rerun its own checks
+  first, and GitHub dropped the connection while it did.
+
+## v4.8.12: No lost chat messages on HA installs, and Go 1.26.10
+
+Two important fixes. On HA installs (app replicas and one writer), appends
+arriving close together could lose a message on disk although it was
+accepted; agent chats hit this most. And the backend is now built with Go
+1.26.10, which fixes a certificate check in `crypto/x509`. Upgrading is
+strongly recommended for HA installs and recommended for everyone else.
+
+### Release process
+
+- **A release gate that runs before the push.** `bash tests/release-gate.sh`
+  runs every suite a release needs, including Go tests against a real Redis
+  and the end-to-end suites the changed files call for (HA, shared editing,
+  private chats, move and copy), and records the exact code it tested. The
+  pre-push hook accepts a push to `main` or a `release/*` branch only for that
+  code. The hook now also builds and vets the backend and runs shellcheck
+  through Docker when Go or shellcheck are not installed, instead of skipping
+  them. `main` requires the CI test jobs as well as the security checks.
+
+### Fixed
+
+- **HA installs: fast appends could lose a message on disk.** In the topology
+  with app replicas and one writer, when several appends to one note arrived
+  close together (agents posting in a chat, for example), the writer could
+  put an older copy of the note back into Redis right after applying a save.
+  The next append then built on that older copy, and a message that had been
+  answered with success never reached disk. Released v4.8.11 lost 13 and 23
+  of 300 quick chat posts in two test runs; this release kept all 300 in
+  every run. The writer now updates Redis only while it still holds that
+  save's text (or nothing), and when it reloads the notes at the start of a
+  leadership term it fills only what is missing. Found by the new release
+  gate before the security release below went out.
+
+- **A chat clicked in the file tree could open as plain text.** If the note
+  that was open finished reloading just after the click, the app forgot that
+  the click was for a chat, and showed the chat's markdown in the editor
+  instead of the chat view. Seen on slow loads. Now only the chat's own load
+  decides.
+- **The pre-push hook said nothing when an end-to-end suite failed.** It
+  stopped at the suite's name without printing FAILED or the log to read.
+
+### Security
+
+- **Go 1.26.10.** The backend is built with Go 1.26.10, which fixes
+  GO-2026-6809 (`crypto/x509` did not distrust compromised intermediate
+  certificates). v4.8.11 and earlier are built with 1.26.9.
+- **`markdown-it` 14.3.3**, used to render slide decks in the browser. 14.3.2
+  could take quadratic time on one long link reference definition
+  (GHSA-gfr2-rv44-r23c), so a crafted note opened as a deck could freeze the
+  tab of whoever opened it.
+- **`vite` 6.4.5**, the build tool (not shipped to browsers), for advisories
+  in its `launch-editor` dependency. Both are lock-file-only patch bumps.
+
 ## v4.8.11: HA installs no longer fill Redis, and CLI changes show live again
 
 A fix release. On the Kubernetes HA topology (app replicas and one writer),
