@@ -14,6 +14,14 @@ All notable changes to mdnest are documented here.
   after v4.8.12. A lock-file-only patch bump; v4.8.12 and earlier carry the
   affected version.
 
+### Changed
+
+- **Settings → API Tokens now lists only your own tokens.** Superadmins
+  revoke other people's tokens from **Admin panel → API Tokens**, which
+  shows each token's owner, names them in the confirmation, and logs who
+  revoked whose token. Anyone who used to do that from Settings will find
+  it there.
+
 ### Fixed
 
 - **An agent's or the CLI's change to an open note now shows, and never
