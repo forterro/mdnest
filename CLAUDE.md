@@ -655,7 +655,7 @@ override: `MDNEST_SKIP_E2E=1`.
   the suite had on one stack: a spec that wipes the sticky board or relies on
   the tree's layout is still alone on its server. `MDNEST_E2E_SHARDS=1` is
   the old single-stack run. Each shard's traces go to
-  `tests/browser/test-results/shard-N`. There are no test-only knobs that
+  `tests/browser-results/shard-N` (all output is outside `tests/browser`, the folder Playwright walks for specs, or a shard can crash on another one's half-written folder). There are no test-only knobs that
   shorten the app's poll intervals: the slow specs (`collab-idle`
   and `cli-vs-typing`) exist to prove behaviour across those real
   intervals.

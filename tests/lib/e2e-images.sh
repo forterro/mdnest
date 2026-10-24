@@ -100,8 +100,8 @@ e2e_playwright_ready() {
   dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../browser" && pwd)"
   (
     if command -v flock >/dev/null 2>&1; then exec 9>"${TMPDIR:-/tmp}/mdnest-e2e-playwright.lock"; flock 9; fi
+    e2e_npm_ready "$dir" "$logdir/playwright-npm.log" || exit 1
     cd "$dir" || exit 1
-    [ -d node_modules ] || npm install --no-audit --no-fund >"$logdir/playwright-npm.log" 2>&1 || exit 1
     npx playwright install chromium >"$logdir/playwright-browser.log" 2>&1
   )
 }
@@ -147,9 +147,10 @@ e2e_run_shards() {
 
 # e2e_shard_args I N: the extra playwright arguments for shard I of N. One
 # shard gets none, so MDNEST_E2E_SHARDS=1 runs exactly the old command. Each
-# shard writes traces to its own folder so two shards never mix them.
+# shard writes traces to its own folder under tests/browser-results, outside
+# the spec folder Playwright walks (see playwright.config.js outputDir).
 e2e_shard_args() {
-  [ "$2" -gt 1 ] && printf -- '--shard=%d/%d --output=test-results/shard-%d\n' "$(($1 + 1))" "$2" "$(($1 + 1))"
+  [ "$2" -gt 1 ] && printf -- '--shard=%d/%d --output=../browser-results/shard-%d\n' "$(($1 + 1))" "$2" "$(($1 + 1))"
   return 0
 }
 
@@ -186,7 +187,7 @@ e2e_main_args() {
 }
 
 # e2e_quiet_args: the playwright arguments for the @budget-only part.
-e2e_quiet_args() { echo "--grep @budget --pass-with-no-tests --output=test-results/quiet"; }
+e2e_quiet_args() { echo "--grep @budget --pass-with-no-tests --output=../browser-results/quiet"; }
 
 # e2e_has_budget SPECS...: true when the selected specs hold any @budget test.
 # Lets MDNEST_E2E_BUDGET=only finish at once, without booting a stack, when
@@ -204,4 +205,71 @@ e2e_has_budget() {
   fi
   echo "e2e_has_budget: $n @budget test(s) selected" >&2
   [ "$n" -gt 0 ]
+}
+
+# e2e_npm_ready DIR LOG: make DIR's node_modules match its package-lock.json,
+# running npm ci when it does not. An install can be missing (a fresh
+# worktree) or stale (an existing node_modules from before a lock change, as
+# after the zod 4 bump): stale means the lock file is newer than the record
+# npm keeps of the last install (node_modules/.package-lock.json), or npm ls
+# finds the installed tree does not satisfy package.json. npm ci then installs
+# exactly what the lock says, and refuses a lock out of step with
+# package.json, so a real mismatch still fails here with npm's own message.
+# Returns 0 when DIR is ready.
+e2e_npm_ready() {
+  local dir="$1" log="$2" why=""
+  if [ ! -d "$dir/node_modules" ]; then why="no node_modules"
+  elif [ ! -f "$dir/node_modules/.package-lock.json" ]; then why="no record of the last install"
+  elif [ "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]; then why="package-lock.json changed since the last install"
+  elif ! (cd "$dir" && npm ls >/dev/null 2>&1); then why="the installed tree does not match package.json"
+  fi
+  [ -z "$why" ] && return 0
+  echo "npm ci in $dir: $why" >&2
+  (cd "$dir" && npm ci --no-audit --no-fund) >"$log" 2>&1
+}
+
+# Notes folders. Each harness bind-mounts a throwaway notes folder under the
+# repo, and the backend container writes into it as root, so a plain rm -rf
+# by the harness's user can fail and leave the folder behind (and a killed
+# run never gets to its cleanup at all).
+#
+# e2e_rm_dirs DIR...: remove each DIR, through a container when rm -rf alone
+# cannot (files owned by the container's root).
+e2e_rm_dirs() {
+  local d
+  for d in "$@"; do
+    [ -n "$d" ] && [ -e "$d" ] || continue
+    rm -rf "$d" 2>/dev/null
+    [ -e "$d" ] || continue
+    docker run --rm -v "$(dirname "$d"):/p" alpine rm -rf "/p/$(basename "$d")" >/dev/null 2>&1
+  done
+  return 0
+}
+
+# e2e_sweep_notes ROOT: remove notes folders left by earlier runs that were
+# killed. A folder carries its run's pid (.e2e-notes.<pid>.<random>), and is
+# swept only when that process is gone, so a harness running side by side is
+# never touched. Folders named before the pid was added (.e2e-notes.<random>)
+# are swept once they are more than 12 hours old.
+e2e_sweep_notes() {
+  local root="$1" d name pid
+  for d in "$root"/.e2e-notes.*; do
+    [ -e "$d" ] || continue
+    name="${d##*/.e2e-notes.}"
+    pid="${name%%.*}"
+    if [ "$pid" != "$name" ] && [ -n "$pid" ] && [ -z "${pid//[0-9]/}" ]; then
+      kill -0 "$pid" 2>/dev/null || e2e_rm_dirs "$d"
+    elif [ -n "$(find "$d" -maxdepth 0 -mmin +720 2>/dev/null)" ]; then
+      e2e_rm_dirs "$d"
+    fi
+  done
+  return 0
+}
+
+# e2e_notes_dir ROOT: sweep old leftovers, then make and print this run's
+# notes folder under ROOT (inside the repo: the Docker VM may not share the
+# system temp dir).
+e2e_notes_dir() {
+  e2e_sweep_notes "$1"
+  mktemp -d "$1/.e2e-notes.$$.XXXXXX"
 }

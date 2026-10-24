@@ -186,7 +186,7 @@ if [ "$LEVEL" = iterate ]; then
     echo "  skip Go: no backend Go file changed"
   fi
   if echo "$CHANGED" | grep -q '^frontend/'; then
-    [ -d frontend/node_modules ] || (cd frontend && npm ci --no-audit --no-fund) >"$LOGDIR/npm-ci.log" 2>&1
+    e2e_npm_ready frontend "$LOGDIR/npm-ci.log" || { echo "  npm ci failed in frontend (log: $LOGDIR/npm-ci.log)"; exit 1; }
     run "frontend npm test" frontend.log sh -c 'cd frontend && npm test --silent'
   else
     echo "  skip npm test: nothing in frontend/ changed"
@@ -209,15 +209,14 @@ if [ "$LEVEL" = iterate ]; then
 fi
 
 # ── develop and ship ─────────────────────────────────────────────────────────
-# A fresh worktree has no node_modules, and the hook's lock-file checks
-# (npm ls) need an install to compare against. npm ci installs exactly what
-# the lock file says and refuses a lock file out of step with package.json,
-# so a real lock problem still fails here, with npm's own message.
-for d in frontend mcp-server; do
-  [ -d "$d/node_modules" ] && continue
-  step "npm ci in $d (no node_modules yet)"
-  (cd "$d" && npm ci --no-audit --no-fund) >"$LOGDIR/npm-ci-$d.log" 2>&1 \
-    || { echo "  npm ci failed in $d: the lock file does not match package.json, or the registry is unreachable (log: $LOGDIR/npm-ci-$d.log)"; exit 1; }
+# The hook's lock-file checks (npm ls) compare against what is installed, so
+# a missing install (a fresh worktree) or a stale one (node_modules from
+# before a lock change) would read as a lock problem. e2e_npm_ready runs
+# npm ci in either case; npm ci refuses a lock file out of step with
+# package.json, so a real lock problem still fails here, with npm's message.
+for d in frontend mcp-server tests/browser; do
+  e2e_npm_ready "$d" "$LOGDIR/npm-ci-${d//\//-}.log" \
+    || { echo "  npm ci failed in $d: the lock file does not match package.json, or the registry is unreachable (log: $LOGDIR/npm-ci-${d//\//-}.log)"; exit 1; }
 done
 
 # Which end-to-end suites this run needs. ship takes all of them.

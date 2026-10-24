@@ -29,7 +29,7 @@ NET="mdnest-e2e-sec-net-$SFX"
 PG="mdnest-e2e-sec-pg-$SFX"
 BE="mdnest-e2e-sec-be-$SFX"
 # Under the repo, not /tmp: the Docker VM may not see the host's temp dir.
-NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
 
 fail() { printf '\033[31m✗ %s\033[0m\n' "$1"; }
 pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
@@ -38,7 +38,7 @@ cleanup() {
   rm -rf "$BUILD_LOGS"
   docker rm -f -v "$BE" "$PG" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR"
+  e2e_rm_dirs "$NOTES_DIR"
 }
 trap cleanup EXIT
 

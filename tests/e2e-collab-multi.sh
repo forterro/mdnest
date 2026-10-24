@@ -47,7 +47,7 @@ cleanup() {
     fi
     docker rm -f -v "${FES[$i]}" "${BES[$i]}" "${PGS[$i]}" >/dev/null 2>&1 || true
     docker network rm "${NETS[$i]}" >/dev/null 2>&1 || true
-    rm -rf "${NOTES[$i]}" "${NOTES[$i]}.cli"
+    e2e_rm_dirs "${NOTES[$i]}" "${NOTES[$i]}.cli"
   done
   rm -rf "$LOGDIR"
   return 0
@@ -88,7 +88,7 @@ boot_shard() {
   local i="$1"
   NET="mdnest-e2e-collab-net-$SFX-$i"; PG="mdnest-e2e-collab-pg-$SFX-$i"
   BE="mdnest-e2e-collab-be-$SFX-$i"; FE="mdnest-e2e-collab-fe-$SFX-$i"
-  NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+  NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
   PGS[i]="$PG"; BES[i]="$BE"; FES[i]="$FE"; NETS[i]="$NET"; NOTES[i]="$NOTES_DIR"
 
   mkdir -p "$NOTES_DIR/testing_workspace"
@@ -200,6 +200,6 @@ if [ "$rc" -eq 0 ]; then
   pass "COLLAB E2E: all specs passed"
   exit 0
 else
-  fail "COLLAB E2E: failures above (traces in tests/browser/test-results)"
+  fail "COLLAB E2E: failures above (traces in tests/browser-results)"
   exit 1
 fi

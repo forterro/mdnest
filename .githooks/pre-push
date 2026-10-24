@@ -338,7 +338,13 @@ if [ ! -d frontend/node_modules ]; then
   # npm ls compares the installed tree, so with nothing installed it fails
   # whatever the lock file says. That is a missing install, not a lock problem.
   echo "NOT INSTALLED"
-  echo "  Run: cd frontend && npm ci   (tests/release-gate.sh does this for you)"
+  echo "  Run: cd frontend && npm ci   (tests/check.sh does this for you)"
+  FAILED=1
+elif [ frontend/package-lock.json -nt frontend/node_modules/.package-lock.json ]; then
+  # The lock changed after the last install (a pull, a dependency bump), so
+  # npm ls would compare against old packages. Not a lock problem.
+  echo "STALE INSTALL"
+  echo "  Run: cd frontend && npm ci   (tests/check.sh does this for you)"
   FAILED=1
 elif (cd frontend && npm ls) > /dev/null 2>&1; then
   echo "OK"
@@ -353,7 +359,13 @@ if [ ! -d mcp-server/node_modules ]; then
   # npm ls compares the installed tree, so with nothing installed it fails
   # whatever the lock file says. That is a missing install, not a lock problem.
   echo "NOT INSTALLED"
-  echo "  Run: cd mcp-server && npm ci   (tests/release-gate.sh does this for you)"
+  echo "  Run: cd mcp-server && npm ci   (tests/check.sh does this for you)"
+  FAILED=1
+elif [ mcp-server/package-lock.json -nt mcp-server/node_modules/.package-lock.json ]; then
+  # The lock changed after the last install (a pull, a dependency bump), so
+  # npm ls would compare against old packages. Not a lock problem.
+  echo "STALE INSTALL"
+  echo "  Run: cd mcp-server && npm ci   (tests/check.sh does this for you)"
   FAILED=1
 elif (cd mcp-server && npm ls) > /dev/null 2>&1; then
   echo "OK"

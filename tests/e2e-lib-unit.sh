@@ -45,7 +45,7 @@ check "zero means one shard" "$(MDNEST_E2E_SHARDS=0 e2e_shards)" "1"
 n="$(MDNEST_E2E_SHARDS='' e2e_shards)"
 [ "$n" -ge 1 ] && [ "$n" -le 3 ] && ok "the default is between 1 and 3 ($n)" || bad "the default is between 1 and 3 ($n)"
 check "one shard adds no playwright arguments" "$(e2e_shard_args 0 1)" ""
-check "shard 2 of 3" "$(e2e_shard_args 1 3)" "--shard=2/3 --output=test-results/shard-2"
+check "shard 2 of 3" "$(e2e_shard_args 1 3)" "--shard=2/3 --output=../browser-results/shard-2"
 check "no more shards than spec files" "$(e2e_cap_shards 3 a.spec.js b.spec.js)" "2"
 check "the whole suite keeps the count" "$(e2e_cap_shards 3)" "3"
 
@@ -57,6 +57,22 @@ e2e_run_shards 3 "$L" all_pass >"$T/out" && ok "every shard passing passes" || b
 grep -q "ran 2" "$T/out" && ok "every shard's log is printed" || bad "every shard's log is printed"
 e2e_run_shards 3 "$L" one_fails >"$T/out" && bad "one failing shard fails the run" || ok "one failing shard fails the run"
 grep -q "shard 2 of 3 FAILED" "$T/out" && ok "the failing shard is named" || bad "the failing shard is named"
+
+echo "notes sweep"
+N="$T/notes"; mkdir -p "$N"
+dead=999999; while kill -0 "$dead" 2>/dev/null; do dead=$((dead - 1)); done
+mkdir -p "$N/.e2e-notes.$$.live1" "$N/.e2e-notes.$$.live1.cli" "$N/.e2e-notes.$dead.gone1" \
+  "$N/.e2e-notes.$dead.gone1.cli" "$N/.e2e-notes.fresh1" "$N/.e2e-notes.old1"
+touch -d '2 days ago' "$N/.e2e-notes.old1"
+e2e_sweep_notes "$N"
+[ -d "$N/.e2e-notes.$$.live1" ] && [ -d "$N/.e2e-notes.$$.live1.cli" ] \
+  && ok "a running run's folders are kept" || bad "a running run's folders are kept"
+[ ! -e "$N/.e2e-notes.$dead.gone1" ] && [ ! -e "$N/.e2e-notes.$dead.gone1.cli" ] \
+  && ok "a dead run's folders are swept" || bad "a dead run's folders are swept"
+[ -d "$N/.e2e-notes.fresh1" ] && ok "a recent old-style folder is kept" || bad "a recent old-style folder is kept"
+[ ! -e "$N/.e2e-notes.old1" ] && ok "an old-style folder over 12 hours old is swept" || bad "an old-style folder over 12 hours old is swept"
+d="$(e2e_notes_dir "$N")"
+case "${d##*/}" in .e2e-notes.$$.*) ok "a new folder carries this run's pid" ;; *) bad "a new folder carries this run's pid ($d)" ;; esac
 
 echo
 echo "e2e-lib-unit: $pass passed, $failed failed"

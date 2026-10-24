@@ -53,7 +53,7 @@ cleanup() {
   for i in "${!BES[@]}"; do
     docker rm -f -v "${FES[$i]}" "${BES[$i]}" >/dev/null 2>&1 || true
     docker network rm "${NETS[$i]}" >/dev/null 2>&1 || true
-    rm -rf "${NOTES[$i]}"
+    e2e_rm_dirs "${NOTES[$i]}"
   done
   [ -z "${KEEP:-}" ] && rm -rf "$LOGDIR"
   return 0
@@ -89,7 +89,7 @@ pass "images ready: $BE_IMAGE, $FE_IMAGE"
 boot_shard() {
   local i="$1"
   BE="mdnest-e2e-be-$SFX-$i"; FE="mdnest-e2e-fe-$SFX-$i"; NET="mdnest-e2e-net-$SFX-$i"
-  NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+  NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
   BES[i]="$BE"; FES[i]="$FE"; NETS[i]="$NET"; NOTES[i]="$NOTES_DIR"
   mkdir -p "$NOTES_DIR/testing_workspace"
   # A second namespace for the move/copy-between-namespaces specs. Named to sort
@@ -322,6 +322,6 @@ if [ "$rc" -eq 0 ]; then
   pass "BROWSER E2E: all specs passed"
   exit 0
 else
-  fail "BROWSER E2E: failures above (traces/screenshots in tests/browser/test-results)"
+  fail "BROWSER E2E: failures above (traces/screenshots in tests/browser-results)"
   exit 1
 fi
