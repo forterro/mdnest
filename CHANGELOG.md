@@ -34,6 +34,16 @@ All notable changes to mdnest are documented here.
   dropped it two minutes after the last person left, or on a restart. The
   server now moves the saver role to another writer when an update has gone
   10 seconds without being saved, and that browser saves it.
+- **The last few letters typed in Live were lost when you switched note
+  straight away.** The Live editor tells the app about a change 200 ms after
+  the last keystroke, and switching note inside that window dropped it: the
+  app had nothing to save yet, and the editor closed before it reported. It
+  happened on every install, with or without shared editing (in a test,
+  typing and switching at once lost the text 5 times out of 5). The editor
+  now hands over that edit before the app moves to the next note.
+- **Sync now saves the open note first.** It commits what is on disk, so
+  typing that had not been saved yet missed the commit and the "Synced" date
+  did not move.
 - **A manual Sync whose pull or push failed looked like it had worked.** The
   request answered OK either way and the label kept showing the last
   commit's date. The response now carries `syncError`, and the sidebar shows
