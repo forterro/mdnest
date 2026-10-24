@@ -189,7 +189,9 @@ Manage long-lived API tokens for CLI and MCP access. Tokens are prefixed with `m
 
 #### GET /api/auth/tokens
 
-List all API tokens (without the token values).
+List your own API tokens (without the token values). In multi mode this is always the
+caller's own tokens, superadmins included; a superadmin sees everyone's tokens through
+[`/api/admin/tokens`](#api-tokens-of-everyone-apiadmintokens).
 
 **Response** (200 OK):
 
@@ -223,7 +225,8 @@ Create a new API token. The token value is only returned once — save it immedi
 
 #### DELETE /api/auth/tokens?id=\<token-id\>
 
-Revoke an API token.
+Revoke one of your own API tokens. Another person's token is refused with `403`, also for a
+superadmin (use `DELETE /api/admin/tokens?id=`).
 
 **Response** (200 OK):
 
@@ -247,6 +250,15 @@ curl -X POST "http://localhost:8286/api/auth/tokens" \
 curl -X DELETE "http://localhost:8286/api/auth/tokens?id=a1b2c3d4" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+### API tokens of everyone: /api/admin/tokens
+
+Multi mode, `RequireSuperAdmin` (Admin panel → **API Tokens**).
+
+| Method | Purpose |
+|---|---|
+| `GET /api/admin/tokens` | Every token with its owner: `id`, `name`, `token_suffix`, `created_at`, `user_id`, `username`. Never the token or its hash. |
+| `DELETE /api/admin/tokens?id=<token-id>` | Revoke anyone's token. The server log records the owner and who revoked it. |
 
 ---
 

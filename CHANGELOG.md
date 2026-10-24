@@ -22,6 +22,14 @@ All notable changes to mdnest are documented here.
   two more). It is only used by the unit tests, so the app served to
   browsers is byte for byte the same.
 
+### Changed
+
+- **Settings → API Tokens now lists only your own tokens.** Superadmins
+  revoke other people's tokens from **Admin panel → API Tokens**, which
+  shows each token's owner, names them in the confirmation, and logs who
+  revoked whose token. Anyone who used to do that from Settings will find
+  it there.
+
 ### Fixed
 
 - **Text typed in a shared note could stay only in the server's memory and

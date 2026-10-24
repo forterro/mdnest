@@ -148,7 +148,10 @@ For headless callers (CLI, MCP server, scripts):
 - Generated as 32 cryptographically random bytes encoded as `mdnest_<base64url>`.
 - Stored as **SHA-256 hashes** — in Postgres (`api_tokens`) in multi mode, or the `tokens.json` secrets file in single mode. The raw token is shown once on creation and never again.
 - Last 4 chars are kept in plain text so they're recognizable in the UI ("ends in `…a3f9`").
-- Never expire. Revoke via Settings → API Tokens or `DELETE /api/auth/tokens?id=`.
+- Never expire. Revoke your own via Settings → API Tokens or `DELETE /api/auth/tokens?id=`.
+  Settings lists only your own tokens, superadmins included, so another person's token is never
+  mistaken for yours. A superadmin revokes someone else's token from Admin panel → **API Tokens**
+  (`/api/admin/tokens`), which shows each token's owner; the server log records who revoked it.
 
 **Token scope (v3.5.0+):** Tokens resolve to their creator's user context at every request. There is **no system-wide admin bypass** for tokens. Specifically:
 
