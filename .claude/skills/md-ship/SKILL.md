@@ -104,9 +104,9 @@ Touch the intro (the pitch, "How it works", "Built for teams", "What you get", "
 
 Any README wording follows the website repo's writing standard, `../mdnest-website/WRITING.md` ([on GitHub](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md)): plain English, no claim the released code does not support, and an "Optional" or "Needs team setup" label on any feature the basic install does not turn on.
 
-### 4. CLAUDE.md
-- New files in the project tree → add them to the structure block in the appropriate section.
-- New conventions, patterns, gotchas → add to the Conventions section.
+### 4. CLAUDE.md and docs/codemap.md
+- New files in the project tree → add them to the map in `docs/codemap.md`, in the appropriate section. A new top-level directory also goes in the short list under "Project Structure" in `CLAUDE.md`.
+- New conventions, patterns, gotchas → add to the Conventions section of `CLAUDE.md`. A trap that belongs to one file goes on that file's line in `docs/codemap.md` instead, so `CLAUDE.md` stays small enough to load in every session.
 
 ### 5. docs/
 Match the change to the right doc:
