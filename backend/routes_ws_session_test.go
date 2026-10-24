@@ -123,6 +123,12 @@ func TestRoutes_SessionSocketSwitchesNotes(t *testing.T) {
 	if m := p.join(t, "alpha", "Shared/a.md"); m["type"] != "joined" {
 		t.Fatal(m)
 	}
+	// "joined" is sent before the server adds the socket to the note, so
+	// wait for Pat's presence (sent once Pat is in) before Owen joins, or
+	// Owen's "join" can go out while Pat is not yet there to receive it.
+	if m := p.waitFor("presence", 2*time.Second); m == nil {
+		t.Fatal("no presence after joining")
+	}
 	if m := o.join(t, "alpha", "Shared/a.md"); m["type"] != "joined" {
 		t.Fatal(m)
 	}

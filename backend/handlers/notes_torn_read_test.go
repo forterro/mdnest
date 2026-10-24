@@ -152,7 +152,11 @@ func TestNoteLock_ReadersDoNotPileUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := NewNoteHandler(stg)
-	big := strings.Repeat("x", 1<<20) + "\n"
+	// 256 KB, not 1 MB: under -race one 1 MB GET costs about 0.7 s of CPU
+	// outside the lock, so 50 of them ran out the clock on an 8-core box
+	// whether or not the lock was fair. The size does not change what this
+	// pins: reads queue behind one write at a time and all finish.
+	big := strings.Repeat("x", 1<<18) + "\n"
 	if err := os.WriteFile(filepath.Join(root, "alpha", "n.md"), []byte(big), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +187,7 @@ func TestNoteLock_ReadersDoNotPileUp(t *testing.T) {
 	go func() { wg.Wait(); close(finished) }()
 	select {
 	case <-finished:
-		t.Logf("50 reads during 1 MB writes finished in %s", time.Since(start))
+		t.Logf("50 reads during 256 KB writes finished in %s", time.Since(start))
 	case <-time.After(15 * time.Second):
 		t.Fatal("readers piled up behind the writes")
 	}
