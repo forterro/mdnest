@@ -679,3 +679,30 @@ func TestYjsHealthySaverKeepsTheRole(t *testing.T) {
 		t.Fatal("the role left a saver that was saving")
 	}
 }
+
+// Everyone dropped and came back: the unsaved updates are older than
+// yjsSaverStuck, but the writer who came back first only just got the role
+// (it merges the file before it binds), so it keeps it for a full
+// yjsSaverStuck. Judging it from the updates' age took the role away
+// mid-join (live-never-blocks (h), throttled).
+func TestYjsNewSaverGetsAFullWindow(t *testing.T) {
+	defer func(i, s time.Duration) { yjsSaverIdle, yjsSaverStuck = i, s }(yjsSaverIdle, yjsSaverStuck)
+	yjsSaverIdle, yjsSaverStuck = time.Hour, 150*time.Millisecond
+	h := sharedHub()
+	a, b := newTestConn(1, "a"), newTestConn(2, "b")
+	hello(h, a)
+	hello(h, b)
+	h.HandleMessage("ns", "a.md", a, true, upd(1))
+	h.HandleMessage("ns", "a.md", b, true, upd(2))
+	h.YjsLeave("ns", "a.md", a)
+	h.YjsLeave("ns", "a.md", b)
+	time.Sleep(2 * yjsSaverStuck) // the updates are now old and unsaved
+	a2, b2 := newTestConn(1, "a"), newTestConn(2, "b")
+	hello(h, a2) // first back: the saver
+	hello(h, b2)
+	drain(a2)
+	time.Sleep(yjsSaverStuck / 2)
+	if _, _, got := roles(func() []yjsControl { _, c := drain(a2); return c }()); got {
+		t.Fatal("the saver who just came back lost the role before its window was up")
+	}
+}

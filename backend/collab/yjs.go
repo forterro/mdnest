@@ -129,6 +129,11 @@ type yjsRoom struct {
 	// handed it again until they send something (an update, a yjs-saved),
 	// so the role does not go back and forth with a socket that is gone.
 	stuck map[*Conn]bool
+	// saverSince: when the current saver got the role. A saver is judged
+	// from then, not from when an update arrived: after everyone dropped and
+	// came back, the unsaved updates are old, and the new saver (merging the
+	// file before it binds) would lose the role at once.
+	saverSince time.Time
 }
 
 type yjsControl struct {
@@ -203,6 +208,7 @@ func (h *Hub) YjsHello(ns, path string, c *Conn) {
 	becameSaver := false
 	if r.saver == nil && !c.ReadOnly {
 		r.saver = c
+		r.saverSince = time.Now()
 		becameSaver = true
 	}
 	c.SendReliable(r.stateFrame())
@@ -407,6 +413,9 @@ func (h *Hub) saverCheck(key string, r *yjsRoom) {
 	if oldest.IsZero() {
 		return // all saved; the next update starts the watch again
 	}
+	if r.saverSince.After(oldest) {
+		oldest = r.saverSince
+	}
 	wait := h.saverStuck - time.Since(oldest)
 	if wait <= 0 {
 		if next := r.latestWritableExcept(r.saver); next != nil {
@@ -430,6 +439,7 @@ func (r *yjsRoom) setSaver(c *Conn) {
 	r.saver = c
 	if old != c {
 		r.asked = false // a pending compaction request went to the old saver
+		r.saverSince = time.Now()
 	}
 	if old != nil && old != c {
 		if _, still := r.members[old]; still {
