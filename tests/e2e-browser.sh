@@ -13,6 +13,7 @@
 # Usage:   tests/e2e-browser.sh
 #          MDNEST_E2E_SHARDS=3 tests/e2e-browser.sh   (three stacks, see below)
 #          MDNEST_E2E_SPECS="smoke.spec.js theme.spec.js" tests/e2e-browser.sh
+#          MDNEST_E2E_ARGS="--repeat-each 3" MDNEST_E2E_SPECS=chat.spec.js tests/e2e-browser.sh
 #
 # Shards: the specs are split across MDNEST_E2E_SHARDS stacks (default: one
 # per 3 CPUs, at most 3; tests/lib/e2e-images.sh e2e_shards). Each shard is a
@@ -301,7 +302,7 @@ pw_run() {
     MDNEST_MERMAID_PALE="$MERMAID_PALE" MDNEST_MERMAID_EDGE="$MERMAID_EDGE" \
     MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
     MDNEST_NOTES_DIR="${NOTES[$i]}" \
-    npx playwright test "$@" ${MDNEST_E2E_SPECS:-}
+    npx playwright test "$@" ${MDNEST_E2E_ARGS:-} ${MDNEST_E2E_SPECS:-}
 }
 # shellcheck disable=SC2046
 run_shard() { pw_run "$1" $(e2e_shard_args "$1" "$SHARDS") $(e2e_main_args "$BUDGET"); }

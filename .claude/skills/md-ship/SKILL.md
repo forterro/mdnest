@@ -46,9 +46,13 @@ work around it, do not cut the release "and fix it after".
    ```bash
    bash tests/release-gate.sh
    ```
-   It runs the whole pre-push release tier, Go tests against a real Redis,
-   shellcheck, and the end-to-end suites the changed files call for (HA,
-   shared editing, private chats, transfer). It records the exact tree that
+   This is the ship level of `tests/check.sh` (`bash tests/check.sh --level
+   ship` is the same), the only level that runs everything: the whole
+   pre-push release tier, Go tests against a real Redis, shellcheck, and every
+   end-to-end suite (browser, shared editing, HA, private chats, transfer,
+   CLI, access), with the `@budget` timing tests last and alone. Changes that
+   merged into `develop` already passed `--level develop` once each; do not
+   rerun lower levels here. It records the exact tree that
    passed, and the pre-push hook refuses to push any other tree to `release/*`
    or `main`. Run it in the background; it takes 20 to 30 minutes.
    `MDNEST_SKIP_E2E=1` is for an emergency only, and the PR must then say which

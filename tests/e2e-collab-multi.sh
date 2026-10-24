@@ -12,6 +12,7 @@
 # Usage:  tests/e2e-collab-multi.sh            (runs the collab-*.spec.js + presence)
 #         MDNEST_E2E_SPECS=collab-shared-editing.spec.js tests/e2e-collab-multi.sh
 #         MDNEST_E2E_SHARDS=1 tests/e2e-collab-multi.sh   (one stack, the old run)
+#         MDNEST_E2E_ARGS="--repeat-each 3"   (extra playwright arguments)
 #
 # Shards: the specs are split across MDNEST_E2E_SHARDS stacks (default: one
 # per 3 CPUs, at most 3). Each shard has its own Postgres, backend, nginx,
@@ -180,7 +181,7 @@ pw_run() {
     MDNEST_USER2=bob MDNEST_PASSWORD2=bobpass123 \
     MDNEST_NOTES_DIR="${NOTES[$i]}" \
     MDNEST_CLI="$REPO_ROOT/mdnest" MDNEST_CLI_HOMES="${NOTES[$i]}.cli" \
-    npx playwright test "$@" ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS}
+    npx playwright test "$@" ${MDNEST_E2E_ARGS:-} ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS}
 }
 # shellcheck disable=SC2046
 run_shard() { pw_run "$1" $(e2e_shard_args "$1" "$SHARDS") $(e2e_main_args "$BUDGET"); }

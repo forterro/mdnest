@@ -386,7 +386,7 @@ fi
 # 8. Shell scripts: shellcheck, host binary or the koalaman/shellcheck image.
 # Mirrors the CI workflow gate: severity `error` only. Lower-severity
 # findings (warnings / info) are non-blocking for now.
-SC_FILES="setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh"
+SC_FILES="setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh tests/check.sh tests/lib/e2e-images.sh"
 SC_CMD=""
 if command -v shellcheck >/dev/null 2>&1; then
   SC_CMD="shellcheck"
