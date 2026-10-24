@@ -622,8 +622,8 @@ override: `MDNEST_SKIP_E2E=1`.
   the tree's layout is still alone on its server. `MDNEST_E2E_SHARDS=1` is
   the old single-stack run. Each shard's traces go to
   `tests/browser/test-results/shard-N`. There are no test-only knobs that
-  shorten the app's poll intervals: the slow specs (`collab-idle`,
-  `cli-vs-typing`, `content-loss`) exist to prove behaviour across those real
+  shorten the app's poll intervals: the slow specs (`collab-idle`
+  and `cli-vs-typing`) exist to prove behaviour across those real
   intervals.
 - **Playwright pins `colorScheme: 'dark'`** in `tests/browser/playwright.config.js`.
   mdnest's default theme is `auto`, which follows `prefers-color-scheme`, and
