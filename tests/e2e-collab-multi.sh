@@ -200,6 +200,6 @@ if [ "$rc" -eq 0 ]; then
   pass "COLLAB E2E: all specs passed"
   exit 0
 else
-  fail "COLLAB E2E: failures above (traces in tests/browser/test-results)"
+  fail "COLLAB E2E: failures above (traces in tests/browser-results)"
   exit 1
 fi

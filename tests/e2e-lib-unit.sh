@@ -45,7 +45,7 @@ check "zero means one shard" "$(MDNEST_E2E_SHARDS=0 e2e_shards)" "1"
 n="$(MDNEST_E2E_SHARDS='' e2e_shards)"
 [ "$n" -ge 1 ] && [ "$n" -le 3 ] && ok "the default is between 1 and 3 ($n)" || bad "the default is between 1 and 3 ($n)"
 check "one shard adds no playwright arguments" "$(e2e_shard_args 0 1)" ""
-check "shard 2 of 3" "$(e2e_shard_args 1 3)" "--shard=2/3 --output=test-results/shard-2"
+check "shard 2 of 3" "$(e2e_shard_args 1 3)" "--shard=2/3 --output=../browser-results/shard-2"
 check "no more shards than spec files" "$(e2e_cap_shards 3 a.spec.js b.spec.js)" "2"
 check "the whole suite keeps the count" "$(e2e_cap_shards 3)" "3"
 

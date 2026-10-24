@@ -322,6 +322,6 @@ if [ "$rc" -eq 0 ]; then
   pass "BROWSER E2E: all specs passed"
   exit 0
 else
-  fail "BROWSER E2E: failures above (traces/screenshots in tests/browser/test-results)"
+  fail "BROWSER E2E: failures above (traces/screenshots in tests/browser-results)"
   exit 1
 fi
