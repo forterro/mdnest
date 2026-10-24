@@ -142,7 +142,7 @@ go_suite() {
     sleep 1
     # shellcheck disable=SC2086
     (cd backend && go vet $pkgs && MDNEST_TEST_REDIS_URL="redis://127.0.0.1:$port/15" go test -race -count=1 $pkgs)
-    local rc=$?; docker rm -f "$rname" >/dev/null 2>&1; return $rc
+    local rc=$?; docker rm -f -v "$rname" >/dev/null 2>&1; return $rc
   fi
   local net="mdnest-gate-$$" rname="mdnest-gate-redis-$$"
   docker network create "$net" >/dev/null || return 1
@@ -152,7 +152,7 @@ go_suite() {
     -v "$REPO_ROOT/backend:/src" -v mdnest-gomod:/go/pkg/mod -v mdnest-gobuild:/root/.cache/go-build \
     -w /src "golang:$GO_VER" sh -c "go vet $pkgs && go test -race -count=1 $pkgs"
   local rc=$?
-  docker rm -f "$rname" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1
+  docker rm -f -v "$rname" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1
   return $rc
 }
 
@@ -296,7 +296,7 @@ echo "  parallel part done ($((SECONDS - t0))s)"
 #            one of them times (BUDGET_CODE_PAT), and a failure is a warning
 #            showing the machine's load, since ship runs them again.
 # When you tag a new test @budget, add the code it times to BUDGET_CODE_PAT.
-BUDGET_CODE_PAT='^frontend/src/(chat\.js|components/Chat)'
+BUDGET_CODE_PAT='^frontend/src/(chat\.js|components/Chat|collab\.js|sharedDoc\.js|App\.jsx|components/LiveEditorCrepe\.jsx)'
 BUDGET_SPECS="$(grep -l "tag: '@budget'" tests/browser/*.spec.js 2>/dev/null | tr '\n' '|' | sed 's/|$//; s/\./\\./g')"
 budget_wanted() {
   [ "$LEVEL" = ship ] && return 0

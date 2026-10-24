@@ -197,7 +197,8 @@ const BROKEN = {
 };
 
 for (const [how, handler] of Object.entries(BROKEN)) {
-  test(`(a) websocket ${how}: a Live note is editable within 1 s and saves`, async ({ page }) => {
+  // @budget: a timing budget, run alone after the shards (tests/lib/e2e-images.sh).
+  test(`(a) websocket ${how}: a Live note is editable within 1 s and saves`, { tag: '@budget' }, async ({ page }) => {
     test.setTimeout(90_000);
     await page.routeWebSocket(WS, handler);
     await login(page, USER, PASS);
