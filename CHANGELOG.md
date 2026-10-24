@@ -13,6 +13,14 @@ All notable changes to mdnest are documented here.
   (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr, GHSA-c6gr-qvv4-5v3f) published
   after v4.8.12. A lock-file-only patch bump; v4.8.12 and earlier carry the
   affected version.
+- **The MCP server's dependencies** for high advisories published after
+  v4.8.12: `zod` 4.6.7 (GHSA-mrhx-c7xc-m3w5, which covers every zod below
+  4.6.6, so the MCP server moves from zod 3 to zod 4; its tools and their
+  inputs are unchanged) and `body-parser` 2.4.0 (GHSA-27r3-jxmh-p828), plus
+  `fast-uri` 3.1.9 and `ip-address` 10.7.4 for moderate ones.
+- **`undici` 7.30.1** in the frontend's test tooling (GHSA-4qv8-2p9j-2685 and
+  two more). It is only used by the unit tests, so the app served to
+  browsers is byte for byte the same.
 
 ### Fixed
 
