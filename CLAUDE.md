@@ -602,6 +602,29 @@ override: `MDNEST_SKIP_E2E=1`.
     instead of silently meaning "off", and a value exported in the shell does
     not leak in. Written because `setup.sh` never forwarded the last two, so
     both were ignored on every setup.sh install and nothing said so.
+- **Images are built once per tree, and the browser suites run in shards**
+  (FAST-1). Every harness gets its images from `tests/lib/e2e-images.sh`,
+  which tags them `mdnest-e2e-backend:<hash>` / `mdnest-e2e-frontend:<hash>`
+  from a hash of `backend/` (or `frontend/` plus the `mdnest` CLI) as the
+  working tree has it, uncommitted and untracked files included, and skips the
+  build when that tag exists. So the release gate and every suite in it share
+  one build, and two runs on different trees can never swap each other's
+  image (the old fixed `:test` tag allowed exactly that). Containers,
+  networks and notes folders carry the run's pid and shard number, so
+  harnesses can run side by side. `MDNEST_E2E_REBUILD=1` builds anyway;
+  `MDNEST_E2E_KEEP_IMAGES` (default 4) is how many tags `e2e_prune_images`
+  keeps. `e2e-browser.sh` and `e2e-collab-multi.sh` split their specs across
+  `MDNEST_E2E_SHARDS` stacks (default one per 3 CPUs, at most 3) with
+  `playwright test --shard=i/N`. Each shard is a whole stack of its own
+  (backend, Postgres where used, nginx, notes folder, accounts, CLI logins)
+  with one worker, so no two specs share a server, which keeps the isolation
+  the suite had on one stack: a spec that wipes the sticky board or relies on
+  the tree's layout is still alone on its server. `MDNEST_E2E_SHARDS=1` is
+  the old single-stack run. Each shard's traces go to
+  `tests/browser/test-results/shard-N`. There are no test-only knobs that
+  shorten the app's poll intervals: the slow specs (`collab-idle`,
+  `cli-vs-typing`, `content-loss`) exist to prove behaviour across those real
+  intervals.
 - **Playwright pins `colorScheme: 'dark'`** in `tests/browser/playwright.config.js`.
   mdnest's default theme is `auto`, which follows `prefers-color-scheme`, and
   Playwright's own default emulation is *light* — so without that pin every
@@ -622,7 +645,7 @@ override: `MDNEST_SKIP_E2E=1`.
   permission checker. The route-by-route coverage is
   `backend/routes_chat_members_test.go`, against an in-memory store.
 - `tests/e2e-collab-multi.sh`: **shared editing (v4.8.10).** Postgres + backend + nginx from the working tree, two accounts with write on testing_workspace, runs `tests/browser/collab-shared-editing.spec.js` (two contexts typing at once, open-and-leave keeps the bytes, saver closing mid-debounce, outside PUT merging in, front matter kept, folder move closes the room, Basic switching to Live), `collab-cli.spec.js` (the REAL ./mdnest, logged in with API tokens in throwaway HOMEs, at a note open in a browser: write/append/prepend/edit show live, a disk write shows via the saver's 20 s check, CLI changes during typing merge), `collab-idle.spec.js` (a note left open a minute: no remount, no change inside the editor, no reconnect), `cli-vs-typing.spec.js` (one person typing past the 60 s poll while the CLI appends: the CLI line must reach disk; prints a RESULT line per run) and `presence.spec.js`. `MDNEST_BUILD_ROOT=<checkout>` builds the app from another tree (an older tag in a throwaway worktree) with today's specs and CLI; `MDNEST_E2E_BACKEND_ENV="SHARED_EDITING=false"` adds backend settings. That is how v4.8.9 was shown to lose CLI text and v4.8.10 not. The notes dir is on the host so specs check disk bytes. Not in the pre-push hook (needs Postgres); run it when touching collab, App's save paths or the Live editor.
-- `tests/release-gate.sh`: **the release gate (v4.8.12).** Run on the release commit before pushing it. It runs the pre-push hook's release tier inline (inside a push, GitHub dropped the SSH connection after 10 minutes), Go vet + `go test -race` with a real Redis (host Go or Docker), shellcheck (host or Docker), and the end-to-end suites picked by the files changed since `origin/main` (`MDNEST_GATE_ALL=1` runs them all). On success it writes the tested tree to `.git/mdnest-release-gate`; the hook refuses a `release/*` or `main` push of any other tree. It refuses to run with uncommitted tracked changes, since the record must name the tree it tested.
+- `tests/release-gate.sh`: **the release gate (v4.8.12).** Run on the release commit before pushing it. It builds the e2e images once, then runs two lanes side by side: the browser lane (`e2e-browser.sh`, then `e2e-collab-multi.sh`, each sharded) and the other lane (the pre-push hook's release tier inline with `MDNEST_GATE_SUITES_OUTSIDE=1`, so the hook leaves its end-to-end suites to the gate; inside a push, GitHub dropped the SSH connection after 10 minutes; Go vet + `go test -race` with a real Redis (host Go or Docker), shellcheck (host or Docker), `e2e-docker`, `e2e-sec-multi`, `backend-image-init`, and the suites picked by the files changed since `origin/main` (`MDNEST_GATE_ALL=1` runs them all)). `MDNEST_GATE_LANES=1` runs the lanes one after the other. On success it writes the tested tree to `.git/mdnest-release-gate`; the hook refuses a `release/*` or `main` push of any other tree. It refuses to run with uncommitted tracked changes, since the record must name the tree it tested.
 - `tests/e2e-ha-durability.sh`: **issue #147.** Redis + one `MDNEST_ROLE=writer` + one `MDNEST_ROLE=app` from the working tree (or `MDNEST_BUILD_ROOT=<checkout>`): a burst of appends must land on the writer's disk with the durability stream back at 0 entries, and a writer whose lock is taken away while Redis is at maxmemory must win it back and apply the next save without a restart. Against v4.8.10 it fails 4 of 9. The unit layer is `backend/storage/redis_queue_test.go`, which needs `MDNEST_TEST_REDIS_URL` (CI's backend job runs a Redis service for it; locally the tests skip without it). Not in the pre-push hook; run it when touching the queue, writer or leader.
 - `tests/e2e-transfer-multi.sh` — **issue #114.** Postgres + the backend from
   the working tree, real users, path-scoped grants, an access group and an API

@@ -398,6 +398,10 @@ fi
 RUN_HEAVY=0
 if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" = "1" ]; then
   echo "Release gate: SKIPPED by MDNEST_SKIP_E2E=1. Say so in the release PR, with the run that covered this tree."
+elif [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" = "1" ] && [ "${MDNEST_GATE_SUITES_OUTSIDE:-0}" = "1" ]; then
+  # tests/release-gate.sh runs the suites below itself, side by side with this
+  # hook's fast tier, instead of one after another in here.
+  echo "End-to-end suites: run by tests/release-gate.sh alongside this hook."
 elif [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" = "1" ]; then
   RUN_HEAVY=1
 fi

@@ -14,19 +14,25 @@
 # made after the gate ran.
 #
 # What it runs:
+#   0. builds the backend and frontend images once, tagged by the tree's hash
+#      (tests/lib/e2e-images.sh); every suite below reuses them
+#   then two lanes side by side:
+#   browser lane: e2e-browser.sh, then e2e-collab-multi.sh (always: live
+#      collaboration only runs in multi mode). Each is split into shards
+#      (MDNEST_E2E_SHARDS), one whole stack per shard.
+#   other lane:
 #   1. the pre-push hook in release mode: builds, unit tests, CLI suites,
-#      audits, govulncheck, version consistency, e2e-docker, e2e-sec-multi,
-#      backend-image-init, e2e-browser
+#      audits, govulncheck, version consistency
 #   2. Go vet + go test -race WITH a real Redis (host Go, else Docker), so the
 #      durability-queue tests run instead of skipping
 #   3. shellcheck (host, else Docker)
-#   4. e2e-collab-multi.sh always (live collaboration only runs in multi
-#      mode), and the suites the changed files call for, compared with
-#      origin/main:
+#   4. e2e-docker, e2e-sec-multi, backend-image-init, and the suites the
+#      changed files call for, compared with origin/main:
 #        backend/storage, deploy/helm, factory     -> e2e-ha-durability.sh
 #        chat members, permission middleware       -> e2e-private-chats-multi.sh
 #        transfer, download                        -> e2e-transfer-multi.sh
-#      MDNEST_GATE_ALL=1 runs all four whatever changed.
+#      MDNEST_GATE_ALL=1 runs all three whatever changed.
+#   MDNEST_GATE_LANES=1 runs the lanes one after the other.
 #
 # Needs docker and node. Exits 0 only if every step passed; nothing is recorded
 # otherwise.
@@ -40,8 +46,6 @@ GO_VER="$(awk '/^go[[:space:]]/{print $2; exit}' backend/go.mod)"
 
 pass=0; failed=0; ran=()
 step() { printf '\033[36m==>\033[0m %s\n' "$*"; }
-ok()   { printf '  \033[32mPASS\033[0m %s\n' "$*"; pass=$((pass + 1)); ran+=("$1"); }
-bad()  { printf '  \033[31mFAIL\033[0m %s (log: %s)\n' "$1" "$2"; failed=$((failed + 1)); }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # The gate tests the working tree, and records HEAD's tree. They must be the
@@ -61,18 +65,40 @@ git fetch -q origin main 2>/dev/null || true
 CHANGED="$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only origin/main HEAD)"
 echo "Gating $(git rev-parse --short HEAD) ($(echo "$CHANGED" | grep -c . ) files changed since origin/main). Logs: $LOGDIR"
 
-run() { # name, log, command...
-  local name="$1" log="$LOGDIR/$2"; shift 2
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
+
+# run NAME LOG COMMAND...: run one check, record its exit code next to its log.
+# Results are read back from those files, because the checks run in two
+# background lanes and a subshell cannot update this shell's counters.
+run() {
+  local name="$1" log="$LOGDIR/$2" t0=$SECONDS rc; shift 2
   step "$name"
-  if "$@" >"$log" 2>&1; then ok "$name"; else bad "$name" "$log"; fi
+  "$@" >"$log" 2>&1; rc=$?
+  printf '%s\n' "$name" >"$log.name"; echo "$rc" >"$log.rc"
+  case "$rc" in
+    0) printf '  \033[32mPASS\033[0m %s (%ds)\n' "$name" "$((SECONDS - t0))" ;;
+    2) printf '  \033[33mSKIP\033[0m %s, prerequisites missing (log: %s)\n' "$name" "$log" ;;
+    *) printf '  \033[31mFAIL\033[0m %s (%ds, log: %s)\n' "$name" "$((SECONDS - t0))" "$log" ;;
+  esac
+  return 0
 }
 
+# 0. Build the two images once. Every suite below finds them by the tree's
+# hash and skips its own build (tests/lib/e2e-images.sh).
+step "Building the e2e images for this tree"
+t0=$SECONDS
+e2e_backend_image "$REPO_ROOT" "$LOGDIR" >/dev/null && e2e_frontend_image "$REPO_ROOT" "$LOGDIR" >/dev/null \
+  && e2e_playwright_ready "$LOGDIR" \
+  || { echo "  image build or Playwright setup failed, logs in $LOGDIR"; exit 1; }
+echo "  ready ($((SECONDS - t0))s)"
+
 # 1. The pre-push hook, in release mode, run here instead of inside a push.
+# Its end-to-end suites run below in the lanes instead of inside the hook.
 hook_release() {
   printf 'HEAD %s refs/heads/release/gate 0000000000000000000000000000000000000000\n' "$(git rev-parse HEAD)" \
-    | MDNEST_GATE_INNER=1 bash .githooks/pre-push
+    | MDNEST_GATE_INNER=1 MDNEST_GATE_SUITES_OUTSIDE=1 bash .githooks/pre-push
 }
-run "pre-push hook, release tier (builds, unit, CLI, audits, e2e-docker, e2e-sec-multi, image init, e2e-browser)" hook.log hook_release
 
 # 2. Go with a real Redis.
 go_suite() {
@@ -95,16 +121,14 @@ go_suite() {
   docker rm -f "$rname" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1
   return $rc
 }
-run "Go vet + go test -race, with Redis" go.log go_suite
 
 # 3. shellcheck, the same files and severity as CI.
-SC_FILES=(setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh)
+SC_FILES=(setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh tests/lib/e2e-images.sh)
 shellcheck_suite() {
   if have shellcheck; then shellcheck -S error "${SC_FILES[@]}"; else
     docker run --rm -v "$REPO_ROOT:/mnt" -w /mnt koalaman/shellcheck:stable -S error "${SC_FILES[@]}"
   fi
 }
-run "shellcheck" shellcheck.log shellcheck_suite
 
 # 4. The suites the changes call for.
 wants() { [ "${MDNEST_GATE_ALL:-0}" = 1 ] || echo "$CHANGED" | grep -qE "$1"; }
@@ -115,13 +139,49 @@ optional() { # pattern, script, why
     echo "  skip $2: nothing it covers changed"
   fi
 }
-optional '^backend/storage/|^deploy/helm/|^backend/main\.go' e2e-ha-durability.sh "HA writer, queue, leader"
-# Always: live collaboration and shared editing exist only in multi mode, so
-# this is the only suite that runs them, and a lockout of every Live note
-# (v4.8.10 to v4.8.12, behind a proxy) needed no change to any file above.
-run "e2e-collab-multi.sh (live collaboration and shared editing, multi mode)" e2e-collab-multi.sh.log bash tests/e2e-collab-multi.sh
-optional 'chat_members|^backend/middleware/permission|^backend/store/chat' e2e-private-chats-multi.sh "private chats"
-optional '^backend/handlers/(transfer|download|treecopy)' e2e-transfer-multi.sh "move, copy, download"
+
+# Two lanes run side by side. The browser lane holds the two Playwright
+# harnesses (each already split into shards); the other lane holds everything
+# that needs no browser. Inside a lane the checks run one after another, so the
+# machine never runs more than one browser harness at a time.
+# MDNEST_GATE_LANES=1 runs both lanes one after the other, as before.
+browser_lane() {
+  run "e2e-browser.sh (UI, single mode)" e2e-browser.sh.log bash tests/e2e-browser.sh
+  # Always: live collaboration and shared editing exist only in multi mode, so
+  # this is the only suite that runs them, and a lockout of every Live note
+  # (v4.8.10 to v4.8.12, behind a proxy) needed no change to any file above.
+  run "e2e-collab-multi.sh (live collaboration and shared editing, multi mode)" e2e-collab-multi.sh.log bash tests/e2e-collab-multi.sh
+}
+other_lane() {
+  run "pre-push hook, release tier (builds, unit, CLI, audits)" hook.log hook_release
+  run "Go vet + go test -race, with Redis" go.log go_suite
+  run "shellcheck" shellcheck.log shellcheck_suite
+  run "e2e-docker.sh (CLI against the backend, host and bare alpine)" e2e-docker.sh.log bash tests/e2e-docker.sh
+  run "e2e-sec-multi.sh (multi-mode access)" e2e-sec-multi.sh.log bash tests/e2e-sec-multi.sh
+  run "backend-image-init.sh (tini reaps orphans)" backend-image-init.sh.log bash tests/backend-image-init.sh
+  optional '^backend/storage/|^deploy/helm/|^backend/main\.go' e2e-ha-durability.sh "HA writer, queue, leader"
+  optional 'chat_members|^backend/middleware/permission|^backend/store/chat' e2e-private-chats-multi.sh "private chats"
+  optional '^backend/handlers/(transfer|download|treecopy)' e2e-transfer-multi.sh "move, copy, download"
+}
+t0=$SECONDS
+if [ "${MDNEST_GATE_LANES:-2}" = 1 ]; then
+  other_lane; browser_lane
+else
+  browser_lane & bpid=$!
+  other_lane
+  wait "$bpid"
+fi
+echo "  all checks done ($((SECONDS - t0))s)"
+
+for rcfile in "$LOGDIR"/*.rc; do
+  [ -e "$rcfile" ] || continue
+  name="$(cat "${rcfile%.rc}.name")"
+  case "$(cat "$rcfile")" in
+    0) pass=$((pass + 1)); ran+=("$name") ;;
+    2) ;;  # reported as SKIP above, as the hook always has
+    *) failed=$((failed + 1)) ;;
+  esac
+done
 
 echo
 echo "=== release gate: $pass passed, $failed failed ==="

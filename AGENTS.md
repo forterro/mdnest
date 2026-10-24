@@ -341,6 +341,29 @@ override: `MDNEST_SKIP_E2E=1`.
     (login, tree, open/render a note, Live [Crepe] + Basic editors, search,
     create-via-UI). Installs Playwright + Chromium into `tests/browser/` on first
     run. Exit code 2 = prerequisites (docker/node) missing → the hook SKIPs it.
+- **Images are built once per tree, and the browser suites run in shards**
+  (FAST-1). Every harness gets its images from `tests/lib/e2e-images.sh`,
+  which tags them `mdnest-e2e-backend:<hash>` / `mdnest-e2e-frontend:<hash>`
+  from a hash of `backend/` (or `frontend/` plus the `mdnest` CLI) as the
+  working tree has it, uncommitted and untracked files included, and skips the
+  build when that tag exists. So the release gate and every suite in it share
+  one build, and two runs on different trees can never swap each other's
+  image (the old fixed `:test` tag allowed exactly that). Containers,
+  networks and notes folders carry the run's pid and shard number, so
+  harnesses can run side by side. `MDNEST_E2E_REBUILD=1` builds anyway;
+  `MDNEST_E2E_KEEP_IMAGES` (default 4) is how many tags `e2e_prune_images`
+  keeps. `e2e-browser.sh` and `e2e-collab-multi.sh` split their specs across
+  `MDNEST_E2E_SHARDS` stacks (default one per 3 CPUs, at most 3) with
+  `playwright test --shard=i/N`. Each shard is a whole stack of its own
+  (backend, Postgres where used, nginx, notes folder, accounts, CLI logins)
+  with one worker, so no two specs share a server, which keeps the isolation
+  the suite had on one stack: a spec that wipes the sticky board or relies on
+  the tree's layout is still alone on its server. `MDNEST_E2E_SHARDS=1` is
+  the old single-stack run. Each shard's traces go to
+  `tests/browser/test-results/shard-N`. There are no test-only knobs that
+  shorten the app's poll intervals: the slow specs (`collab-idle`,
+  `cli-vs-typing`, `content-loss`) exist to prove behaviour across those real
+  intervals.
 - **Adding a regression test is part of fixing a bug** (see `md-fix-bugs`): add a
   check to the layer that would have caught it — a CLI-behaviour bug → a
   `cli-smoke-test.sh` assertion; a parser/fallback bug → a `cli-unit.sh` case; a
