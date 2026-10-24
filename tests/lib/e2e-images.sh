@@ -157,3 +157,40 @@ e2e_cap_shards() {
   [ "$#" -gt 0 ] && [ "$#" -lt "$n" ] && n="$#"
   echo "$n"
 }
+
+# Timing-budget tests (tagged @budget in their title) measure how fast the app
+# reacts, against a fixed number of milliseconds. They are only meaningful
+# when nothing else from the run is using the CPU, so by default the shards
+# skip them and one stack runs them alone once the shards are done.
+# MDNEST_E2E_BUDGET:
+#   after   (default) shards skip @budget, then one stack runs only @budget
+#   skip    shards skip @budget, nothing runs them (the release gate does,
+#           after all of its parallel work)
+#   only    run only the @budget tests, on one stack
+#   inline  no split at all: every test in its shard, the old behaviour
+e2e_budget_mode() {
+  case "${MDNEST_E2E_BUDGET:-after}" in
+    after|skip|only|inline) echo "${MDNEST_E2E_BUDGET:-after}" ;;
+    *) echo after ;;
+  esac
+}
+
+# e2e_main_args MODE: the playwright filter for the sharded part.
+e2e_main_args() {
+  # No --pass-with-no-tests here: a mistyped MDNEST_E2E_SPECS must fail, not pass.
+  case "$1" in after|skip) echo "--grep-invert @budget" ;; esac
+  return 0
+}
+
+# e2e_quiet_args: the playwright arguments for the @budget-only part.
+e2e_quiet_args() { echo "--grep @budget --pass-with-no-tests --output=test-results/quiet"; }
+
+# e2e_has_budget SPECS...: true when the selected specs hold any @budget test.
+# Lets MDNEST_E2E_BUDGET=only finish at once, without booting a stack, when
+# there is nothing to run.
+e2e_has_budget() {
+  local dir
+  dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../browser" && pwd)"
+  (cd "$dir" && npx playwright test --list --grep @budget --pass-with-no-tests "$@" 2>/dev/null) \
+    | grep -q '›'
+}

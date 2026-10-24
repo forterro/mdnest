@@ -65,6 +65,13 @@ docker info >/dev/null 2>&1        || { fail "docker daemon isn't running"; exit
 command -v node >/dev/null 2>&1    || { fail "node is required for Playwright"; exit 2; }
 command -v npx  >/dev/null 2>&1    || { fail "npx is required for Playwright"; exit 2; }
 
+BUDGET="$(e2e_budget_mode)"
+if [ "$BUDGET" = only ]; then
+  e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed"; exit 1; }
+  # shellcheck disable=SC2086
+  e2e_has_budget ${MDNEST_E2E_SPECS:-} || { pass "no @budget tests in the selected specs, nothing to run"; exit 0; }
+fi
+
 # ── Build both images from the working tree (or reuse them) ─────────────────
 # Tagged by a hash of the tree (tests/lib/e2e-images.sh), so a tree that was
 # already built, by this harness or another one, is not built again.
@@ -282,9 +289,10 @@ e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed (see $LOGDIR/p
 pass "Playwright ready"
 
 # ── Run the browser suite, one Playwright process per shard ─────────────────
-run_shard() {
-  local i="$1"
-  # shellcheck disable=SC2046,SC2086
+# pw_run I ARGS...: playwright against shard I's stack.
+pw_run() {
+  local i="$1"; shift
+  # shellcheck disable=SC2086
   cd tests/browser && \
     MDNEST_BASE_URL="${BASES[$i]}" \
     MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
@@ -293,10 +301,23 @@ run_shard() {
     MDNEST_MERMAID_PALE="$MERMAID_PALE" MDNEST_MERMAID_EDGE="$MERMAID_EDGE" \
     MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
     MDNEST_NOTES_DIR="${NOTES[$i]}" \
-    npx playwright test $(e2e_shard_args "$i" "$SHARDS") ${MDNEST_E2E_SPECS:-}
+    npx playwright test "$@" ${MDNEST_E2E_SPECS:-}
 }
-log "Running the browser suite on $SHARDS shard(s): ${BASES[*]}"
-if e2e_run_shards "$SHARDS" "$LOGDIR" run_shard; then
+# shellcheck disable=SC2046
+run_shard() { pw_run "$1" $(e2e_shard_args "$1" "$SHARDS") $(e2e_main_args "$BUDGET"); }
+rc=0
+if [ "$BUDGET" != only ]; then
+  log "Running the browser suite on $SHARDS shard(s): ${BASES[*]}"
+  e2e_run_shards "$SHARDS" "$LOGDIR" run_shard || rc=1
+fi
+if [ "$BUDGET" = after ] || [ "$BUDGET" = only ]; then
+  # The timing-budget tests, alone on the first stack, with nothing else from
+  # this run using the CPU.
+  log "Running the @budget timing tests alone on ${BASES[0]}"
+  # shellcheck disable=SC2046
+  ( pw_run 0 $(e2e_quiet_args) ) || rc=1
+fi
+if [ "$rc" -eq 0 ]; then
   pass "BROWSER E2E: all specs passed"
   exit 0
 else

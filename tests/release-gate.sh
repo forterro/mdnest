@@ -33,6 +33,8 @@
 #        transfer, download                        -> e2e-transfer-multi.sh
 #      MDNEST_GATE_ALL=1 runs all three whatever changed.
 #   MDNEST_GATE_LANES=1 runs the lanes one after the other.
+#   5. last, alone: the @budget timing tests (fixed millisecond budgets), on
+#      one stack per harness, once nothing else is running.
 #
 # Needs docker and node. Exits 0 only if every step passed; nothing is recorded
 # otherwise.
@@ -157,11 +159,11 @@ optional() { # pattern, script, why
 # machine never runs more than one browser harness at a time.
 # MDNEST_GATE_LANES=1 runs both lanes one after the other, as before.
 browser_lane() {
-  run "e2e-browser.sh (UI, single mode)" e2e-browser.sh.log bash tests/e2e-browser.sh
+  run "e2e-browser.sh (UI, single mode)" e2e-browser.sh.log env MDNEST_E2E_BUDGET=skip bash tests/e2e-browser.sh
   # Always: live collaboration and shared editing exist only in multi mode, so
   # this is the only suite that runs them, and a lockout of every Live note
   # (v4.8.10 to v4.8.12, behind a proxy) needed no change to any file above.
-  run "e2e-collab-multi.sh (live collaboration and shared editing, multi mode)" e2e-collab-multi.sh.log bash tests/e2e-collab-multi.sh
+  run "e2e-collab-multi.sh (live collaboration and shared editing, multi mode)" e2e-collab-multi.sh.log env MDNEST_E2E_BUDGET=skip bash tests/e2e-collab-multi.sh
 }
 other_lane() {
   run "pre-push hook, release tier (builds, unit, CLI, audits)" hook.log hook_release
@@ -182,7 +184,17 @@ else
   other_lane
   wait "$bpid"
 fi
-echo "  all checks done ($((SECONDS - t0))s)"
+echo "  parallel part done ($((SECONDS - t0))s)"
+
+# 5. The timing-budget tests (@budget, see tests/lib/e2e-images.sh), last and
+# alone: they compare against a fixed number of milliseconds, so they only
+# mean something once nothing else from the gate is using the CPU.
+t0=$SECONDS
+run "@budget timing tests, single mode (alone)" budget-browser.log \
+  env MDNEST_E2E_BUDGET=only MDNEST_E2E_SHARDS=1 bash tests/e2e-browser.sh
+run "@budget timing tests, multi mode (alone)" budget-collab.log \
+  env MDNEST_E2E_BUDGET=only MDNEST_E2E_SHARDS=1 bash tests/e2e-collab-multi.sh
+echo "  quiet part done ($((SECONDS - t0))s)"
 
 for rcfile in "$LOGDIR"/*.rc; do
   [ -e "$rcfile" ] || continue

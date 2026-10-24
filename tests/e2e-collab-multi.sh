@@ -74,6 +74,12 @@ pass "images ready: $BE_IMAGE, $FE_IMAGE"
 DEFAULT_SPECS="collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js shared-unavailable.spec.js"
 # shellcheck disable=SC2086
 SHARDS="$(e2e_cap_shards "$(e2e_shards)" ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS})"
+BUDGET="$(e2e_budget_mode)"
+if [ "$BUDGET" = only ]; then
+  e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed"; exit 1; }
+  # shellcheck disable=SC2086
+  e2e_has_budget ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS} || { pass "no @budget tests in the selected specs, nothing to run"; exit 0; }
+fi
 
 # boot_shard I: Postgres, backend and nginx for shard I, then alice and bob
 # with write access and a CLI login each.
@@ -164,19 +170,32 @@ done
 log "Preparing Playwright"
 e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed"; cat "$LOGDIR"/playwright-*.log; exit 1; }
 
-run_shard() {
-  local i="$1"
-  # shellcheck disable=SC2046,SC2086
+# pw_run I ARGS...: playwright against shard I's stack.
+pw_run() {
+  local i="$1"; shift
+  # shellcheck disable=SC2086
   cd tests/browser && \
     MDNEST_BASE_URL="${BASES[$i]}" \
     MDNEST_USER=alice MDNEST_PASSWORD=alicepass123 \
     MDNEST_USER2=bob MDNEST_PASSWORD2=bobpass123 \
     MDNEST_NOTES_DIR="${NOTES[$i]}" \
     MDNEST_CLI="$REPO_ROOT/mdnest" MDNEST_CLI_HOMES="${NOTES[$i]}.cli" \
-    npx playwright test $(e2e_shard_args "$i" "$SHARDS") ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS}
+    npx playwright test "$@" ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS}
 }
-log "Running the two-user specs on $SHARDS shard(s): ${BASES[*]}"
-if e2e_run_shards "$SHARDS" "$LOGDIR" run_shard; then
+# shellcheck disable=SC2046
+run_shard() { pw_run "$1" $(e2e_shard_args "$1" "$SHARDS") $(e2e_main_args "$BUDGET"); }
+rc=0
+if [ "$BUDGET" != only ]; then
+  log "Running the two-user specs on $SHARDS shard(s): ${BASES[*]}"
+  e2e_run_shards "$SHARDS" "$LOGDIR" run_shard || rc=1
+fi
+if [ "$BUDGET" = after ] || [ "$BUDGET" = only ]; then
+  # The timing-budget tests, alone on the first stack (see e2e_budget_mode).
+  log "Running the @budget timing tests alone on ${BASES[0]}"
+  # shellcheck disable=SC2046
+  ( pw_run 0 $(e2e_quiet_args) ) || rc=1
+fi
+if [ "$rc" -eq 0 ]; then
   pass "COLLAB E2E: all specs passed"
   exit 0
 else
