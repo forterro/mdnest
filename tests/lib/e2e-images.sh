@@ -227,3 +227,49 @@ e2e_npm_ready() {
   echo "npm ci in $dir: $why" >&2
   (cd "$dir" && npm ci --no-audit --no-fund) >"$log" 2>&1
 }
+
+# Notes folders. Each harness bind-mounts a throwaway notes folder under the
+# repo, and the backend container writes into it as root, so a plain rm -rf
+# by the harness's user can fail and leave the folder behind (and a killed
+# run never gets to its cleanup at all).
+#
+# e2e_rm_dirs DIR...: remove each DIR, through a container when rm -rf alone
+# cannot (files owned by the container's root).
+e2e_rm_dirs() {
+  local d
+  for d in "$@"; do
+    [ -n "$d" ] && [ -e "$d" ] || continue
+    rm -rf "$d" 2>/dev/null
+    [ -e "$d" ] || continue
+    docker run --rm -v "$(dirname "$d"):/p" alpine rm -rf "/p/$(basename "$d")" >/dev/null 2>&1
+  done
+  return 0
+}
+
+# e2e_sweep_notes ROOT: remove notes folders left by earlier runs that were
+# killed. A folder carries its run's pid (.e2e-notes.<pid>.<random>), and is
+# swept only when that process is gone, so a harness running side by side is
+# never touched. Folders named before the pid was added (.e2e-notes.<random>)
+# are swept once they are more than 12 hours old.
+e2e_sweep_notes() {
+  local root="$1" d name pid
+  for d in "$root"/.e2e-notes.*; do
+    [ -e "$d" ] || continue
+    name="${d##*/.e2e-notes.}"
+    pid="${name%%.*}"
+    if [ "$pid" != "$name" ] && [ -n "$pid" ] && [ -z "${pid//[0-9]/}" ]; then
+      kill -0 "$pid" 2>/dev/null || e2e_rm_dirs "$d"
+    elif [ -n "$(find "$d" -maxdepth 0 -mmin +720 2>/dev/null)" ]; then
+      e2e_rm_dirs "$d"
+    fi
+  done
+  return 0
+}
+
+# e2e_notes_dir ROOT: sweep old leftovers, then make and print this run's
+# notes folder under ROOT (inside the repo: the Docker VM may not share the
+# system temp dir).
+e2e_notes_dir() {
+  e2e_sweep_notes "$1"
+  mktemp -d "$1/.e2e-notes.$$.XXXXXX"
+}

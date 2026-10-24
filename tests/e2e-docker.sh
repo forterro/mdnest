@@ -32,7 +32,7 @@ NET="mdnest-e2e-net-$SFX"
 # the container then saw an empty /notes and the run died at "could not seed
 # note" before a single test ran. The repo is shareable by definition: the
 # dev stack already bind-mounts its namespaces from here.
-NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
 CLI_HOME="$(mktemp -d)"
 FAILED=0
 
@@ -44,7 +44,7 @@ cleanup() {
   rm -rf "$BUILD_LOGS"
   docker rm -f -v "$CONTAINER"  >/dev/null 2>&1 || true
   docker network rm "$NET"   >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR" "$CLI_HOME"
+  e2e_rm_dirs "$NOTES_DIR" "$CLI_HOME"
 }
 trap cleanup EXIT
 

@@ -36,7 +36,7 @@ cleanup() {
   rm -rf "$BUILD_LOGS"
   docker rm -f -v "$APP" "$WRITER" "$REDIS" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR"
+  e2e_rm_dirs "$NOTES_DIR"
 }
 trap cleanup EXIT
 
