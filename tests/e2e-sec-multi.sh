@@ -21,7 +21,9 @@ while IFS= read -r v; do unset "$v"; done < <(env | sed -n 's/^\(GIT_[A-Z_]*\)=.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-IMAGE="mdnest-e2e-backend:sec"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
+BUILD_LOGS="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-build.XXXXXX")"
 SFX="$$"
 NET="mdnest-e2e-sec-net-$SFX"
 PG="mdnest-e2e-sec-pg-$SFX"
@@ -33,6 +35,7 @@ fail() { printf '\033[31m✗ %s\033[0m\n' "$1"; }
 pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 
 cleanup() {
+  rm -rf "$BUILD_LOGS"
   docker rm -f "$BE" "$PG" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$NOTES_DIR"
@@ -44,7 +47,7 @@ command -v python3 >/dev/null 2>&1 || { fail "python3 is required"; exit 2; }
 command -v git >/dev/null 2>&1 || { fail "git is required"; exit 2; }
 
 echo "▶ building the backend from the working tree"
-docker build -t "$IMAGE" backend/ >/tmp/mdnest-e2e-sec-build.log 2>&1 || { fail "build failed"; tail -30 /tmp/mdnest-e2e-sec-build.log; exit 1; }
+IMAGE="$(e2e_backend_image "$REPO_ROOT" "$BUILD_LOGS")" || { fail "build failed"; exit 1; }
 
 PRIVATE_ID="dddddddd-4444-4444-8444-444444444444"
 A="$NOTES_DIR/alpha"
