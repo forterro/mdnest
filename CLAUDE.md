@@ -625,6 +625,14 @@ override: `MDNEST_SKIP_E2E=1`.
   shorten the app's poll intervals: the slow specs (`collab-idle`
   and `cli-vs-typing`) exist to prove behaviour across those real
   intervals.
+  Timing-budget tests (a fixed millisecond limit, like chat.spec.js "typing
+  stays fast in a long chat") carry `{ tag: '@budget' }`. The shards skip
+  them and one stack runs them alone afterwards (`MDNEST_E2E_BUDGET`:
+  `after` is the default, `skip`, `only`, or `inline` for no split), because
+  a budget measured while other shards use the CPU fails for reasons that
+  have nothing to do with the app. The release gate runs them last, after
+  all of its parallel work. Tag any new test that compares a duration with a
+  fixed number.
 - **Playwright pins `colorScheme: 'dark'`** in `tests/browser/playwright.config.js`.
   mdnest's default theme is `auto`, which follows `prefers-color-scheme`, and
   Playwright's own default emulation is *light* — so without that pin every
