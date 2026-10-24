@@ -20,7 +20,9 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-IMAGE="mdnest-e2e-backend:test"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
+BUILD_LOGS="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-build.XXXXXX")"
 SFX="$$"
 CONTAINER="mdnest-e2e-be-$SFX"
 NET="mdnest-e2e-net-$SFX"
@@ -39,6 +41,7 @@ fail() { printf '\033[31m✗ %s\033[0m\n' "$1"; }
 pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 
 cleanup() {
+  rm -rf "$BUILD_LOGS"
   docker rm -f "$CONTAINER"  >/dev/null 2>&1 || true
   docker network rm "$NET"   >/dev/null 2>&1 || true
   rm -rf "$NOTES_DIR" "$CLI_HOME"
@@ -51,10 +54,8 @@ docker info >/dev/null 2>&1        || { fail "docker daemon isn't running"; exit
 
 # ── Build the backend from the working tree ──────────────────────────────────
 log "Building backend image from the working tree"
-if ! docker build -t "$IMAGE" backend/ >/tmp/mdnest-e2e-build.log 2>&1; then
-  fail "backend image build failed"; tail -30 /tmp/mdnest-e2e-build.log; exit 1
-fi
-pass "backend image built"
+IMAGE="$(e2e_backend_image "$REPO_ROOT" "$BUILD_LOGS")" || { fail "backend image build failed"; exit 1; }
+pass "backend image ready: $IMAGE"
 
 # ── Start a throwaway single-mode instance ───────────────────────────────────
 mkdir -p "$NOTES_DIR/testing_workspace" "$NOTES_DIR/testing_workspace_2"
