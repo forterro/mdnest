@@ -32,7 +32,12 @@ async function login(page) {
   }
   await page.addInitScript(() => { try { localStorage.setItem('mdnest_editor_mode', 'live'); } catch { /* ignore */ } });
   await page.goto('/');
-  if (await page.locator('input[name=username]').isVisible({ timeout: 5_000 }).catch(() => false)) {
+  // Wait for either the login form or a session already signed in (the
+  // cleanup page shares the context). isVisible() does not wait: called
+  // before the form had rendered it said "signed in", and the sign-in
+  // never happened.
+  await expect(page.locator('input[name=username], .ns-label, .ns-select').first()).toBeVisible({ timeout: 20_000 });
+  if (await page.locator('input[name=username]').isVisible()) {
     await page.fill('input[name=username]', USER);
     await page.fill('input[name=password]', PASS);
     await page.click('button:has-text("Sign in")');
