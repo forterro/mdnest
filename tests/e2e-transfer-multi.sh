@@ -31,7 +31,7 @@ pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 
 cleanup() {
   rm -rf "$BUILD_LOGS"
-  docker rm -f "$BE" "$PG" >/dev/null 2>&1 || true
+  docker rm -f -v "$BE" "$PG" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$NOTES_DIR"
 }
