@@ -186,6 +186,18 @@ else
   FAILED=1
 fi
 
+# 2c2. The e2e image cache and shard runner (tests/lib/e2e-images.sh): the
+# tree hash must change with any change to the image's files, or a suite would
+# reuse an image built from other code. Docker-free.
+echo -n "E2E image cache and shard runner... "
+if bash tests/e2e-lib-unit.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/e2e-lib-unit.sh"
+  FAILED=1
+fi
+
 # 2d. setup.sh generation tests: assert that config knobs actually reach the
 # generated .env / docker-compose.yml. The backend ignores env it does not
 # read, so a knob whose plumbing breaks does not fail — it silently reverts to
