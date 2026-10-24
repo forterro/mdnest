@@ -169,9 +169,16 @@ function Sidebar({
     setSyncing(true);
     try {
       const result = await adminSyncNamespace(selectedNs);
-      if (result.lastCommit) {
-        setSyncInfo((prev) => prev ? { ...prev, lastCommit: result.lastCommit } : prev);
-      }
+      // Re-read the status (the background sync's state included), and show
+      // a pull or push that failed just now: the request answers 200 either
+      // way, and the label only shows the last commit's date, so a failed
+      // Sync used to look like one with nothing to do.
+      const status = await adminSyncStatus(selectedNs).catch(() => null);
+      setSyncInfo((prev) => {
+        let next = status || (prev ? { ...prev, lastCommit: result.lastCommit || prev.lastCommit } : prev);
+        if (next && result.syncError) next = { ...next, daemonState: 'error', daemonMessage: result.syncError };
+        return next;
+      });
       if (onRefreshTree) await onRefreshTree();
     } catch (e) {
       console.error('Sync failed:', e);

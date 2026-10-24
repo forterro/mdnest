@@ -34,6 +34,11 @@ All notable changes to mdnest are documented here.
   dropped it two minutes after the last person left, or on a restart. The
   server now moves the saver role to another writer when an update has gone
   10 seconds without being saved, and that browser saves it.
+- **A manual Sync whose pull or push failed looked like it had worked.** The
+  request answered OK either way and the label kept showing the last
+  commit's date. The response now carries `syncError`, and the sidebar shows
+  "Git sync broken" with the reason. A Sync with nothing new to commit still
+  leaves the date as it was, since the label is the last commit's date.
 - **An agent's or the CLI's change to an open note now shows, and never
   costs the person their typing, on a default install.** With live
   collaboration off (the default), the browser only checked an open note

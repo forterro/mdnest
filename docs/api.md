@@ -775,6 +775,17 @@ The sidebar polls this every 60s and shows a red ✕ + **Retry** when `daemonSta
 
 Trigger an immediate sync for a namespace (commit pending changes, pull `--ff-only`, push). Same auth as `sync-status`. This is what the sidebar **Retry** / **Sync** button calls.
 
+It answers 200 even when the pull or push fails, since the commit may still have worked. `syncError` then holds a short reason (empty when everything worked), and the sidebar shows it as "Git sync broken".
+
+```json
+{
+  "status": "ok",
+  "git": "...",
+  "lastCommit": "2026-07-02 16:53:09 +0000",
+  "syncError": "push failed: fatal: could not read from remote repository"
+}
+```
+
 ---
 
 ## Search
