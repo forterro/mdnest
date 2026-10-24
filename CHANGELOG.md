@@ -24,6 +24,16 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Text typed in a shared note could stay only in the server's memory and
+  be lost** (reported by a user: edits were gone later, with no history
+  entry, and coming back to the note showed the old text and then the new).
+  Only one browser in a shared room, the saver, writes the file. When a
+  connection was lost but the server still held it (a proxy or tunnel keeping
+  its side open) and the tab reconnected quickly, the old connection stayed
+  the saver and nothing was saved. The room kept the text in memory, and
+  dropped it two minutes after the last person left, or on a restart. The
+  server now moves the saver role to another writer when an update has gone
+  10 seconds without being saved, and that browser saves it.
 - **An agent's or the CLI's change to an open note now shows, and never
   costs the person their typing, on a default install.** With live
   collaboration off (the default), the browser only checked an open note

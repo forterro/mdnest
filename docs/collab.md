@@ -121,6 +121,16 @@ picks it: the first person who can write, and later whoever is typing once the
 current saver has been quiet for a few seconds. When the saver leaves, the
 next person takes over and saves anything that was not saved yet.
 
+The server also checks that the saver is saving. If an update has gone 10
+seconds without a save confirming it, the role moves to the writer who was
+active most recently, and that browser saves. This covers a saver that is
+present on the server but cannot save: a connection the browser has lost
+while a proxy keeps the server's side open, or a frozen background tab. The
+old saver is not given the role again until it sends something. Before this,
+a tab that reconnected quickly could leave its old, dead connection as the
+saver, so nothing was saved: the file kept the old text, and coming back to
+the note showed the old text and then the room's newer text.
+
 The saver writes only when the editor's text differs from what was last saved.
 That is why opening a note and leaving it never rewrites the file, even though
 the Live editor would format some markdown differently (for example `*` list
@@ -239,7 +249,16 @@ always sent.
 
 - `backend/collab/yjs_test.go`: joining gets the whole log, read-only updates
   are dropped, room and server limits, the room is freed on leave (or kept
-  when unsaved), saver handover, snapshots.
+  when unsaved), saver handover, snapshots, and a saver that does not save
+  losing the role (also to a writer who comes back later) while one that
+  saves keeps it.
+- `tests/browser/content-loss.spec.js` (in both `tests/e2e-collab-multi.sh`
+  and `tests/e2e-browser.sh`): type, switch note, come back, and check the
+  file on disk, again with every tab closed, and that the server kept no room
+  with unsaved updates. One tab switching at once, after 400 ms and after
+  2 s; a second tab idle or frozen on the note; the socket dropping; the file
+  changed on disk behind the app (a git-sync stash and a reset); and a socket
+  the tab lost but the server still holds.
 - `backend/collab/connection_test.go` and `backend/routes_ws_session_test.go`:
   the one-socket visit. Every join is checked against grants (path scopes,
   links, `.git`, read-only), switching leaves the old note and its room with

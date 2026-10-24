@@ -45,6 +45,8 @@ type Hub struct {
 
 	// Shared editing (Yjs) rooms, see yjs.go. shared is set once at startup.
 	shared     bool
+	// saverStuck is yjsSaverStuck, read once when shared editing is turned on.
+	saverStuck time.Duration
 	ymu        sync.Mutex
 	rooms      map[string]*yjsRoom
 	yjsBytes   int                         // update bytes held across all rooms
