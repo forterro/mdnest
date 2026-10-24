@@ -2759,6 +2759,7 @@ function App() {
         onPickFolder={setPickedFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
+        onBeforeSync={flushPendingSave}
         isAdmin={isAdmin}
         serverVersion={appConfig?.version}
         serverCommit={appConfig?.commit}
@@ -3053,6 +3054,7 @@ function App() {
                             sharedBound={sharedBound}
                             onChange={sharedBound ? handleSharedChange : (canWriteCurrent ? handleContentChange : null)}
                             registerOutsideMerge={registerOutsideMerge}
+                            registerFlush={registerEditorFlush}
                             // Editable at once: before the room is bound the
                             // note saves the normal way. Read-only only
                             // without write permission.

@@ -36,7 +36,8 @@ import { Crepe } from '@milkdown/crepe';
 import { imageSchema } from '@milkdown/preset-commonmark';
 import { imageBlockSchema } from '@milkdown/components/image-block';
 import { editorViewCtx, nodeViewCtx, parserCtx, serializerCtx, SchemaReady } from '@milkdown/core';
-import { TextSelection } from '@milkdown/prose/state';
+import { TextSelection, Plugin, PluginKey } from '@milkdown/prose/state';
+import { $prose } from '@milkdown/utils';
 import { Fragment } from '@milkdown/prose/model';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { blockConfig } from '@milkdown/plugin-block';
@@ -259,6 +260,10 @@ export default function LiveEditorCrepe({
   // moment, because markdownUpdated reaches the app a little late: merging
   // the app's copy dropped the newest keystrokes and moved the caret.
   registerOutsideMerge,
+  // Registers a function the app calls before it navigates away
+  // (flushPendingSave): it reports an edit the listener has not reported
+  // yet, so the app can save it.
+  registerFlush,
 }) {
   const rootRef = useRef(null);
   const sharedRef = useRef(shared || null);
@@ -270,6 +275,14 @@ export default function LiveEditorCrepe({
   const toFull = (body) => (bodyOnlyRef.current ? joinFrontMatter(fmRef.current, body) : body);
   const paneRef = useRef(null);
   const crepeRef = useRef(null);
+  // Milkdown reports a change 200 ms after the last keystroke. Switching
+  // note inside that window used to drop the edit: the app's flush had no
+  // save queued, and the editor's unmount cancelled the report. pendingEdit
+  // marks an edit the listener has not reported yet; report is the
+  // listener's own handler, so a flush runs every check it does.
+  const pendingEditRef = useRef(false);
+  const reportRef = useRef(null);
+  const lastReportedRef = useRef(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onWikiLinkRef = useRef(onWikiLink);
@@ -472,9 +485,26 @@ export default function LiveEditorCrepe({
     tryUse(composedMermaidPlugin, 'composedMermaidPlugin');
     tryUse(tableClickFixPlugin, 'tableClickFixPlugin');
     if (collabPlugin) tryUse(collabPlugin, 'collab');
+    // The same transactions the listener counts (it skips addToHistory:
+    // false, which our own outside merges use).
+    tryUse($prose(() => new Plugin({
+      key: new PluginKey('mdnest-pending-edit'),
+      state: {
+        init: () => null,
+        apply: (tr) => {
+          if ((tr.docChanged || tr.storedMarksSet) && tr.getMeta('addToHistory') !== false) pendingEditRef.current = true;
+          return null;
+        },
+      },
+    })), 'pendingEditPlugin');
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, reported, prev) => {
+        pendingEditRef.current = false;
+        lastReportedRef.current = reported;
+        reportRef.current?.(reported, prev);
+      });
+      reportRef.current = (reported, prev) => {
         // The listener serializes the document of the last USER transaction
         // and skips ours (an outside change is applied with addToHistory:
         // false). When one landed in its 200 ms window, `reported` is the
@@ -524,7 +554,7 @@ export default function LiveEditorCrepe({
         injectedEchoRef.current = null;
         const cb = onChangeRef.current;
         if (cb) cb(restored);
-      });
+      };
     });
 
     crepe.create().then(() => {
@@ -771,6 +801,22 @@ export default function LiveEditorCrepe({
     });
     return () => registerOutsideMerge(null);
   }, [registerOutsideMerge, innerEditor, applyExternalDoc]);
+
+  // Before the app navigates away: report the edit the listener is still
+  // holding back (see pendingEditRef). Nothing pending, nothing reported, so
+  // opening a note and leaving it still writes nothing.
+  useEffect(() => {
+    if (!registerFlush) return undefined;
+    registerFlush(() => {
+      if (!pendingEditRef.current || !crepeRef.current || !reportRef.current) return;
+      pendingEditRef.current = false;
+      let md;
+      try { md = crepeRef.current.getMarkdown(); } catch { return; }
+      reportRef.current(md, lastReportedRef.current);
+      lastReportedRef.current = md;
+    });
+    return () => registerFlush(null);
+  }, [registerFlush]);
 
   // Hand the editor to the shared session when there is one. It binds when
   // the room is ready, to the document as it is then, and unbinds if the
