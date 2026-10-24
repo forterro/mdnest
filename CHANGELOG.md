@@ -4,6 +4,8 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.14 (in progress)
+
 ## v4.8.13: No more lost typing in Live notes, and Live never waits for the connection
 
 Released 2026-10-24.
