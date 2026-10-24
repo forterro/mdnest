@@ -84,6 +84,17 @@ run() {
   return 0
 }
 
+# 0a. A fresh worktree has no node_modules, and the hook's lock-file checks
+# (npm ls) need an install to compare against. npm ci installs exactly what
+# the lock file says and refuses a lock file out of step with package.json,
+# so a real lock problem still fails here, with npm's own message.
+for d in frontend mcp-server; do
+  [ -d "$d/node_modules" ] && continue
+  step "npm ci in $d (no node_modules yet)"
+  (cd "$d" && npm ci --no-audit --no-fund) >"$LOGDIR/npm-ci-$d.log" 2>&1 \
+    || { echo "  npm ci failed in $d: the lock file does not match package.json, or the registry is unreachable (log: $LOGDIR/npm-ci-$d.log)"; exit 1; }
+done
+
 # 0. Build the two images once. Every suite below finds them by the tree's
 # hash and skips its own build (tests/lib/e2e-images.sh).
 step "Building the e2e images for this tree"

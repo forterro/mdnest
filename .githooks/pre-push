@@ -334,7 +334,13 @@ fi
 
 # 6. Lock file integrity: package-lock.json must be in sync with package.json
 echo -n "Frontend lock file... "
-if (cd frontend && npm ls) > /dev/null 2>&1; then
+if [ ! -d frontend/node_modules ]; then
+  # npm ls compares the installed tree, so with nothing installed it fails
+  # whatever the lock file says. That is a missing install, not a lock problem.
+  echo "NOT INSTALLED"
+  echo "  Run: cd frontend && npm ci   (tests/release-gate.sh does this for you)"
+  FAILED=1
+elif (cd frontend && npm ls) > /dev/null 2>&1; then
   echo "OK"
 else
   echo "OUT OF SYNC"
@@ -343,7 +349,13 @@ else
 fi
 
 echo -n "MCP Server lock file... "
-if (cd mcp-server && npm ls) > /dev/null 2>&1; then
+if [ ! -d mcp-server/node_modules ]; then
+  # npm ls compares the installed tree, so with nothing installed it fails
+  # whatever the lock file says. That is a missing install, not a lock problem.
+  echo "NOT INSTALLED"
+  echo "  Run: cd mcp-server && npm ci   (tests/release-gate.sh does this for you)"
+  FAILED=1
+elif (cd mcp-server && npm ls) > /dev/null 2>&1; then
   echo "OK"
 else
   echo "OUT OF SYNC"
