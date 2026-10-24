@@ -28,7 +28,7 @@ All notable changes to mdnest are documented here.
   revoke other people's tokens from **Admin panel → API Tokens**, which
   shows each token's owner, names them in the confirmation, and logs who
   revoked whose token. Anyone who used to do that from Settings will find
-  it there.
+  it there. Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #149.
 
 ### Fixed
 
