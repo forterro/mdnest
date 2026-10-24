@@ -102,6 +102,13 @@ run() {
   local name="$1" log="$LOGDIR/$2" t0=$SECONDS rc; shift 2
   step "$name"
   "$@" >"$log" 2>&1; rc=$?
+  # SOFT=1: a failure is a warning (rc 3), counted in neither total.
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] && [ "${SOFT:-0}" = 1 ]; then
+    printf '  \033[33mWARN\033[0m %s failed at load %s, not blocking at this level (log: %s)\n' \
+      "$name" "$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)" "$log"
+    printf '%s\n' "$name" >"$log.name"; echo 3 >"$log.rc"
+    return 0
+  fi
   printf '%s\n' "$name" >"$log.name"; echo "$rc" >"$log.rc"
   case "$rc" in
     0) printf '  \033[32mPASS\033[0m %s (%ds)\n' "$name" "$((SECONDS - t0))" ;;
@@ -159,6 +166,7 @@ tally() {
     case "$(cat "$rcfile")" in
       0) pass=$((pass + 1)); ran+=("$name") ;;
       2) ;;  # reported as SKIP above, as the hook always has
+      3) ;;  # reported as WARN above (SOFT=1)
       *) failed=$((failed + 1)) ;;
     esac
   done
@@ -281,16 +289,32 @@ echo "  parallel part done ($((SECONDS - t0))s)"
 
 # The timing-budget tests (@budget, see tests/lib/e2e-images.sh), last and
 # alone: they compare against a fixed number of milliseconds, so they only
-# mean something once nothing else from this run is using the CPU. A harness
-# with no @budget test in its specs ends at once without booting a stack.
+# mean something once nothing else from this run is using the CPU. They also
+# react to load from anything else on the machine, so:
+#   ship     runs them always, and a failure blocks the release;
+#   develop  runs them only when the diff touches a @budget spec or the code
+#            one of them times (BUDGET_CODE_PAT), and a failure is a warning
+#            showing the machine's load, since ship runs them again.
+# When you tag a new test @budget, add the code it times to BUDGET_CODE_PAT.
+BUDGET_CODE_PAT='^frontend/src/(chat\.js|components/Chat)'
+BUDGET_SPECS="$(grep -l "tag: '@budget'" tests/browser/*.spec.js 2>/dev/null | tr '\n' '|' | sed 's/|$//; s/\./\\./g')"
+budget_wanted() {
+  [ "$LEVEL" = ship ] && return 0
+  echo "$CHANGED" | grep -qE "$BUDGET_CODE_PAT${BUDGET_SPECS:+|^($BUDGET_SPECS)\$}"
+}
+budget_soft=1; [ "$LEVEL" = ship ] && budget_soft=0
 t0=$SECONDS
-if wants "$BROWSER_PAT"; then
-  run "@budget timing tests, single mode (alone)" budget-browser.log \
-    env MDNEST_E2E_BUDGET=only MDNEST_E2E_SHARDS=1 bash tests/e2e-browser.sh
-fi
-if wants "$COLLAB_PAT"; then
-  run "@budget timing tests, multi mode (alone)" budget-collab.log \
-    env MDNEST_E2E_BUDGET=only MDNEST_E2E_SHARDS=1 bash tests/e2e-collab-multi.sh
+if budget_wanted; then
+  if wants "$BROWSER_PAT"; then
+    SOFT=$budget_soft run "@budget timing tests, single mode (alone)" budget-browser.log \
+      env MDNEST_E2E_BUDGET=only MDNEST_E2E_SHARDS=1 bash tests/e2e-browser.sh
+  fi
+  if wants "$COLLAB_PAT"; then
+    SOFT=$budget_soft run "@budget timing tests, multi mode (alone)" budget-collab.log \
+      env MDNEST_E2E_BUDGET=only MDNEST_E2E_SHARDS=1 bash tests/e2e-collab-multi.sh
+  fi
+else
+  echo "  skip @budget timing tests: the diff touches no @budget spec and none of the code they time"
 fi
 echo "  quiet part done ($((SECONDS - t0))s)"
 

@@ -20,14 +20,17 @@
 E2E_IMAGE_SCHEME=1   # bump to invalidate every cached tag
 
 # e2e_tree_hash ROOT PATH...: a hash of PATH... under ROOT as the working tree
-# has them now. Uses a throwaway copy of the index, so the real one is never
-# touched. Prints nothing when ROOT is not a git checkout.
+# has them now. Uses a throwaway index, so the real one is never touched. The
+# throwaway index starts EMPTY, so git reads every file: a copy of the real
+# index carries its cached file sizes and times, and git then skipped a file
+# edited in the same second with the same size, which gave the old hash for
+# new code (seen 1 time in 15 under load). Prints nothing when ROOT is not a
+# git checkout.
 e2e_tree_hash() {
   local root="$1"; shift
   ( cd "$root" 2>/dev/null || exit 1
     git rev-parse --git-dir >/dev/null 2>&1 || exit 1
-    local idx; idx="$(mktemp)"
-    cp "$(git rev-parse --git-path index)" "$idx" 2>/dev/null || : >"$idx"
+    local idx; idx="$(mktemp -u "${TMPDIR:-/tmp}/mdnest-e2e-index.XXXXXX")"
     GIT_INDEX_FILE="$idx" git add -A -- "$@" >/dev/null 2>&1
     { echo "scheme $E2E_IMAGE_SCHEME"; GIT_INDEX_FILE="$idx" git ls-files -s -- "$@"; } \
       | git hash-object --stdin | cut -c1-16
@@ -187,10 +190,18 @@ e2e_quiet_args() { echo "--grep @budget --pass-with-no-tests --output=test-resul
 
 # e2e_has_budget SPECS...: true when the selected specs hold any @budget test.
 # Lets MDNEST_E2E_BUDGET=only finish at once, without booting a stack, when
-# there is nothing to run.
+# there is nothing to run. It fails safe: if the listing errors, or prints no
+# "Total:" line it can read, it answers true and the tests run, so a broken
+# listing can never skip them silently. The listing's summary goes to stderr.
 e2e_has_budget() {
-  local dir
+  local dir out rc n
   dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../browser" && pwd)"
-  (cd "$dir" && npx playwright test --list --grep @budget --pass-with-no-tests "$@" 2>/dev/null) \
-    | grep -q '›'
+  out="$(cd "$dir" && npx playwright test --list --grep @budget --pass-with-no-tests "$@" 2>&1)"; rc=$?
+  n="$(printf '%s\n' "$out" | sed -n 's/^Total: \([0-9][0-9]*\) test.*/\1/p' | tail -1)"
+  if [ "$rc" -ne 0 ] || [ -z "$n" ]; then
+    printf 'e2e_has_budget: listing failed (exit %s), running the @budget tests anyway:\n%s\n' "$rc" "$(printf '%s\n' "$out" | tail -5)" >&2
+    return 0
+  fi
+  echo "e2e_has_budget: $n @budget test(s) selected" >&2
+  [ "$n" -gt 0 ]
 }

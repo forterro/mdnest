@@ -320,9 +320,12 @@ time.** The entry point is `bash tests/check.sh --level <level>` (default
 | `develop` | before merging a branch into develop | the pre-push fast tier, `go vet` + `go test -race` on the whole backend with Redis, shellcheck, and the e2e suites the files changed since `origin/develop` call for, each once, sharded. A spec whose flake was just fixed gets `MDNEST_E2E_ARGS="--repeat-each 3"`, not 10 | about 15 to 20 min |
 | `ship` | `md-ship`: a `release/*` or `main` push | the full gate, the only level that runs everything: every suite, compared with `origin/main`, recorded in `.git/mdnest-release-gate` for the hook. `bash tests/release-gate.sh` is the same thing. Upgrade checks when stored data changed stay a manual `md-ship` step | as long as it takes |
 
-At `develop` and `ship` the images are built once, the browser suites run in
-one lane beside everything else, and the `@budget` timing tests run last,
-alone. The pre-push hook is unchanged: it still refuses a `release/*` or
+At `develop` and `ship` the images are built once and the browser suites run
+in one lane beside everything else. The `@budget` timing tests run last,
+alone: always at `ship`, where a failure blocks; at `develop` only when the
+diff touches a `@budget` spec or the code it times (`BUDGET_CODE_PAT` in
+`tests/check.sh`), and there a failure is a warning that prints the machine's
+load, because those budgets react to load from other projects on the box. The pre-push hook is unchanged: it still refuses a `release/*` or
 `main` push of a tree the ship level did not pass.
 
 **Tiered, fully-local test strategy — no CI/remote needed.** All of it runs on the
@@ -384,9 +387,10 @@ override: `MDNEST_SKIP_E2E=1`.
   them and one stack runs them alone afterwards (`MDNEST_E2E_BUDGET`:
   `after` is the default, `skip`, `only`, or `inline` for no split), because
   a budget measured while other shards use the CPU fails for reasons that
-  have nothing to do with the app. The release gate runs them last, after
-  all of its parallel work. Tag any new test that compares a duration with a
-  fixed number.
+  have nothing to do with the app. `tests/check.sh` runs them last, after
+  all of its parallel work (see the levels table above). Tag any new test
+  that compares a duration with a fixed number, and add the code it times to
+  `BUDGET_CODE_PAT` in `tests/check.sh`.
 - **Adding a regression test is part of fixing a bug** (see `md-fix-bugs`): add a
   check to the layer that would have caught it — a CLI-behaviour bug → a
   `cli-smoke-test.sh` assertion; a parser/fallback bug → a `cli-unit.sh` case; a
