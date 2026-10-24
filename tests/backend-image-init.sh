@@ -22,7 +22,7 @@ command -v docker >/dev/null 2>&1 || { echo "SKIP: docker not found"; exit 2; }
 . "$REPO_ROOT/tests/lib/e2e-images.sh"
 BUILD_LOGS="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-build.XXXXXX")"
 CONTAINER="mdnest-init-be-$$"
-cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1; rm -rf "$BUILD_LOGS"; }
+cleanup() { docker rm -f -v "$CONTAINER" >/dev/null 2>&1; rm -rf "$BUILD_LOGS"; }
 trap cleanup EXIT
 
 IMAGE="$(e2e_backend_image "$REPO_ROOT" "$BUILD_LOGS")" || { echo "FAIL: backend image build"; exit 1; }

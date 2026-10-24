@@ -34,7 +34,7 @@ bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; failed=$((failed + 1)); }
 
 cleanup() {
   rm -rf "$BUILD_LOGS"
-  docker rm -f "$APP" "$WRITER" "$REDIS" >/dev/null 2>&1 || true
+  docker rm -f -v "$APP" "$WRITER" "$REDIS" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$NOTES_DIR"
 }
