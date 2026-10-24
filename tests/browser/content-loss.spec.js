@@ -332,3 +332,45 @@ test('content stays on disk: the socket goes half-open and the tab reconnects', 
     await ctx.close();
   }
 });
+
+// The note is open on another device (here another browser context) that
+// opened it first, so the server picked it as the room's saver. This tab
+// types and leaves at once, and comes back a moment later: the file must
+// already hold the text. When only the saver wrote the file, this tab's
+// typing reached it only after the other device's save delay, so coming
+// back showed the old file and then the room's newer text, every time.
+test('note open on another device: leaving and coming back at once shows the new text, from the file', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const other = await browser.newContext();
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  const cfg = await login(page);
+  test.skip(!(cfg.liveCollab && cfg.sharedEditing), 'needs shared editing (tests/e2e-collab-multi.sh)');
+  const stamp = Date.now();
+  const file = `loss-device-${stamp}.md`;
+  const away = `loss-device-away-${stamp}.md`;
+  expect((await api(page, 'POST', file, '# Loss\n\n12345\n')).status).toBe(201);
+  expect((await api(page, 'POST', away, '# Away\n\nsomething else\n')).status).toBe(201);
+  try {
+    const device = await other.newPage();
+    await login(device);
+    await open(device, file, '12345');
+    await waitInRoom(device);
+    await open(page, file, '12345');
+    await waitInRoom(page);
+    await typeAfter(page, '12345', '6789');
+    await open(page, away, 'something else');
+    await page.waitForTimeout(300);
+    await page.evaluate((h) => { window.location.hash = h; }, `#${NS}/${file}`);
+    const shown = await watchEditor(page, 3000);
+    const flash = shown.some((t) => t.includes('12345') && !t.includes('123456789'));
+    console.log(`RESULT other device: shown on return ${JSON.stringify(shown.map((t) => t.replace(/\s+/g, ' ').slice(0, 30)))}`);
+    expect(flash, 'the old text showed before the new on return').toBe(false);
+    expect(await onDisk(page, file)).toContain('123456789');
+  } finally {
+    await api(page, 'DELETE', file);
+    await api(page, 'DELETE', away);
+    await other.close();
+    await ctx.close();
+  }
+});

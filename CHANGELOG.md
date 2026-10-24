@@ -34,6 +34,13 @@ All notable changes to mdnest are documented here.
   dropped it two minutes after the last person left, or on a restart. The
   server now moves the saver role to another writer when an update has gone
   10 seconds without being saved, and that browser saves it.
+- **Coming back to a shared note showed the old text for a moment, then the
+  new** (reported by a user, every time). Only one browser in a room, the
+  saver, wrote the file. When the note was also open in another tab or on
+  another device that held that role, your typing reached the file only
+  after that browser's save delay, so coming back straight away loaded the
+  old file and then the room's newer text. A tab leaving a note now saves
+  the room's unsaved text itself, so the file already has it.
 - **The last few letters typed in Live were lost when you switched note
   straight away.** The Live editor tells the app about a change 200 ms after
   the last keystroke, and switching note inside that window dropped it: the

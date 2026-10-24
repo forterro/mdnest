@@ -619,9 +619,10 @@ export class SharedSession {
     return md !== null && !this._unchanged(md);
   }
 
-  async _save() {
+  // anyTab: save even though this tab is not the saver (leaving the note).
+  async _save({ anyTab = false } = {}) {
     if (this.saving) { this.savePending = true; return this.saving; }
-    if (!this.saver || this.closed || this.disabled || !this.bound || !this.meta.get('hasBase')) return undefined;
+    if ((!this.saver && !anyTab) || this.closed || this.disabled || !this.bound || !this.meta.get('hasBase')) return undefined;
     const md = this.fullMarkdown();
     if (md === null) return undefined;
     const recv = this.lastSeq;
@@ -651,6 +652,9 @@ export class SharedSession {
         this.onEvent({ type: 'saved', text: md, etag: res.etag });
       } catch (e) {
         if (this.closed || gen !== this.gen) return;
+        // Not the saver: the saver wrote first (or an outside change did) and
+        // merges the file into the room itself. Its text has ours in it.
+        if (e.status === 409 && !this.saver) return;
         if (e.status === 409) {
           await this._checkOutside();
           this.savePending = true;
@@ -673,12 +677,16 @@ export class SharedSession {
     return undefined;
   }
 
-  // Save now (before leaving the note). Only the saver writes; the others'
-  // text is already in the room.
+  // Save now (before leaving the note), whether or not this tab is the
+  // saver. The room has this tab's text, but when another tab or device held
+  // the saver role, the file got it only after that tab's save delay (or
+  // never, if that tab could not save): coming back showed the old file and
+  // then the room's newer text. A save that races the saver's is refused
+  // (409) and dropped here; the saver's text includes ours.
   async flush() {
     this._cancelSave();
-    if (this.saver && this.dirty()) await this._save();
-    else if (this.saving) await this.saving;
+    if (this.saving) await this.saving;
+    if (this.dirty()) await this._save({ anyTab: true });
   }
 
   _onPageHide() {
