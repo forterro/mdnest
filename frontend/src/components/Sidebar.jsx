@@ -93,6 +93,9 @@ function Sidebar({
   pickedFolder,
   onPickFolder,
   onRefreshTree,
+  // Saves what the open note still holds (a queued autosave, the editor's
+  // unreported typing, a shared room's text) before Sync commits the disk.
+  onBeforeSync,
   isAdmin,
   width,
   onResize,
@@ -168,17 +171,27 @@ function Sidebar({
     if (syncing || !selectedNs) return;
     setSyncing(true);
     try {
+      // Sync commits what is on disk. Typing not saved yet would otherwise
+      // miss this commit, and the label would keep its old date.
+      if (onBeforeSync) { try { await onBeforeSync(); } catch { /* the save reports its own errors */ } }
       const result = await adminSyncNamespace(selectedNs);
-      if (result.lastCommit) {
-        setSyncInfo((prev) => prev ? { ...prev, lastCommit: result.lastCommit } : prev);
-      }
+      // Re-read the status (the background sync's state included), and show
+      // a pull or push that failed just now: the request answers 200 either
+      // way, and the label only shows the last commit's date, so a failed
+      // Sync used to look like one with nothing to do.
+      const status = await adminSyncStatus(selectedNs).catch(() => null);
+      setSyncInfo((prev) => {
+        let next = status || (prev ? { ...prev, lastCommit: result.lastCommit || prev.lastCommit } : prev);
+        if (next && result.syncError) next = { ...next, daemonState: 'error', daemonMessage: result.syncError };
+        return next;
+      });
       if (onRefreshTree) await onRefreshTree();
     } catch (e) {
       console.error('Sync failed:', e);
     } finally {
       setSyncing(false);
     }
-  }, [syncing, selectedNs, onRefreshTree]);
+  }, [syncing, selectedNs, onRefreshTree, onBeforeSync]);
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
   const touchMoved = useRef(false);

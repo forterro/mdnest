@@ -45,7 +45,7 @@ cleanup() {
     if [ -n "${KEEP_LOGS:-}" ]; then
       docker logs "${BES[$i]}" >"$KEEP_LOGS$([ "$i" -gt 0 ] && echo ".$((i + 1))")" 2>&1 || true
     fi
-    docker rm -f "${FES[$i]}" "${BES[$i]}" "${PGS[$i]}" >/dev/null 2>&1 || true
+    docker rm -f -v "${FES[$i]}" "${BES[$i]}" "${PGS[$i]}" >/dev/null 2>&1 || true
     docker network rm "${NETS[$i]}" >/dev/null 2>&1 || true
     rm -rf "${NOTES[$i]}" "${NOTES[$i]}.cli"
   done
@@ -72,7 +72,7 @@ BE_IMAGE="$(e2e_backend_image "$BUILD_ROOT" "$LOGDIR")" || { fail "backend build
 FE_IMAGE="$(e2e_frontend_image "$BUILD_ROOT" "$LOGDIR")" || { fail "frontend build failed"; exit 1; }
 pass "images ready: $BE_IMAGE, $FE_IMAGE"
 
-DEFAULT_SPECS="collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js shared-unavailable.spec.js"
+DEFAULT_SPECS="collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js shared-unavailable.spec.js live-never-blocks.spec.js content-loss.spec.js"
 # shellcheck disable=SC2086
 SHARDS="$(e2e_cap_shards "$(e2e_shards)" ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS})"
 BUDGET="$(e2e_budget_mode)"
@@ -179,7 +179,7 @@ pw_run() {
     MDNEST_BASE_URL="${BASES[$i]}" \
     MDNEST_USER=alice MDNEST_PASSWORD=alicepass123 \
     MDNEST_USER2=bob MDNEST_PASSWORD2=bobpass123 \
-    MDNEST_NOTES_DIR="${NOTES[$i]}" \
+    MDNEST_NOTES_DIR="${NOTES[$i]}" MDNEST_BACKEND_CONTAINER="${BES[$i]}" \
     MDNEST_CLI="$REPO_ROOT/mdnest" MDNEST_CLI_HOMES="${NOTES[$i]}.cli" \
     npx playwright test "$@" ${MDNEST_E2E_ARGS:-} ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS}
 }

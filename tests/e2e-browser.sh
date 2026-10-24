@@ -51,7 +51,7 @@ pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 cleanup() {
   local i
   for i in "${!BES[@]}"; do
-    docker rm -f "${FES[$i]}" "${BES[$i]}" >/dev/null 2>&1 || true
+    docker rm -f -v "${FES[$i]}" "${BES[$i]}" >/dev/null 2>&1 || true
     docker network rm "${NETS[$i]}" >/dev/null 2>&1 || true
     rm -rf "${NOTES[$i]}"
   done
