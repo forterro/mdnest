@@ -4,7 +4,14 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.13 (in progress)
+## v4.8.13: No more lost typing in Live notes, and Live never waits for the connection
+
+Released 2026-10-24.
+
+This release fixes several ways typed text could be lost. The main one: in a
+shared note, text could stay only in the server's memory and disappear later.
+Live notes are also editable as soon as they open, even behind a proxy or on
+a slow connection. Upgrading is strongly recommended for everyone.
 
 ### Security
 
@@ -176,6 +183,22 @@ All notable changes to mdnest are documented here.
   gate's record before anything else: a tree the gate passed is accepted at
   once, any other tree is refused at once. It used to rerun its own checks
   first, and GitHub dropped the connection while it did.
+- **Three test levels and faster test runs.** `bash tests/check.sh --level
+  iterate|develop|ship` runs only what a step needs: the tests for what
+  changed while working, the suites a branch touches before it merges, and
+  everything before a release (`tests/release-gate.sh` is the ship level).
+  The test images are built once per tree and shared by every suite, and the
+  browser suites run in parallel on separate stacks. Timing tests run last,
+  alone, so load on the machine does not fail them.
+
+### Documentation
+
+- **A writing standard for public text** (#144). The README, the user docs,
+  the CHANGELOG and the release notes follow the website's `WRITING.md`:
+  plain English, and no promise the released code does not keep.
+- **The file-by-file map of the repo moved to `docs/codemap.md`** (#151), so
+  the instructions coding agents load in every session stay short. Thanks to
+  [@sanshads](https://github.com/sanshads).
 
 ## v4.8.12: No lost chat messages on HA installs, and Go 1.26.10
 
