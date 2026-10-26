@@ -6,15 +6,6 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.14 (in progress)
 
-## v4.8.13: No more lost typing in Live notes, and Live never waits for the connection
-
-Released 2026-10-24.
-
-This release fixes several ways typed text could be lost. The main one: in a
-shared note, text could stay only in the server's memory and disappear later.
-Live notes are also editable as soon as they open, even behind a proxy or on
-a slow connection. Upgrading is strongly recommended for everyone.
-
 ### Added
 
 - **Milestones on the task board, and who created and closed each task.** A
@@ -30,10 +21,27 @@ a slow connection. Upgrading is strongly recommended for everyone.
   `completed` (UTC), written by the server; the card shows who created it and
   when. Agents get `save_milestone` / `delete_milestone` and a `milestone`
   field on the task tools.
-- **Task lists open on the board.** A note holding only tasks, or a
-  `.tasks.md` file, opens on the task board for that note instead of the
-  editor; **+ Tasks** in the sidebar creates one. Leaving it with **Editor**
-  is remembered for that note.
+- **+ Tasks** in the sidebar creates a task list, a `.tasks.md` file that
+  opens on the task board for that note.
+
+### Changed
+
+- **With the task board on, a note that holds only tasks now opens on the
+  board instead of the editor.** This includes existing notes: a note whose
+  lines are only tasks (with their fields, sub-tasks and notes), headings or
+  blank lines opens on the board, on **This note**. A note with any other
+  text opens in the editor as before. Picking **Editor** on such a note is
+  remembered for that note (in this browser), and **Board** brings the board
+  back.
+
+## v4.8.13: No more lost typing in Live notes, and Live never waits for the connection
+
+Released 2026-10-24.
+
+This release fixes several ways typed text could be lost. The main one: in a
+shared note, text could stay only in the server's memory and disappear later.
+Live notes are also editable as soon as they open, even behind a proxy or on
+a slow connection. Upgrading is strongly recommended for everyone.
 
 ### Security
 
