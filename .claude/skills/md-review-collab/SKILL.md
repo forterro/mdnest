@@ -471,6 +471,20 @@ instead of isolating what actually differed.
 
 ## Field notes (things that cost a round trip)
 
+- **`<scratch>` in this skill means a folder Docker can see**, such as
+  `/Volumes/Work/ahsan/repos/WorkTrees/mdnest/review-pr-<n>`, never `/tmp`
+  or a session scratchpad under `/private/tmp`. Colima only shares the work
+  volume and the home folder, so a worktree under `/tmp` is mounted as an
+  empty folder: Go reports "does not contain main module", `e2e-docker.sh`
+  cannot find `/src/mdnest`, and the browser suite gets a 404 seeding a note.
+  Every suite fails in seconds and none of it says anything about the PR.
+  Probes you write yourself (a node script, a regex timing) can stay in the
+  scratchpad.
+- **Running the contributor's own scripts needs permission rules.** Auto mode
+  refuses `npm ci` and `bash tests/check.sh` in a contributor's tree unless
+  `.claude/settings.local.json` allows them. If they are refused, finish the
+  static review and hand the owner the exact command, with the worktree on
+  the work volume and the cleanup on the same line.
 - `go test -race` needs cgo, which `golang:*-alpine` lacks by default:
   ```bash
   docker run --rm -e CGO_ENABLED=1 -v "$PWD/backend":/src -w /src \
