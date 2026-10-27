@@ -20,7 +20,8 @@ All notable changes to mdnest are documented here.
   `.mdnest/board.json`. Tasks now record `created-by`, `created` and
   `completed` (UTC), written by the server; the card shows who created it and
   when. Agents get `save_milestone` / `delete_milestone` and a `milestone`
-  field on the task tools.
+  field on the task tools. Thanks to
+  [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #153.
 - **+ Tasks** in the sidebar creates a task list, a `.tasks.md` file that
   opens on the task board for that note.
 
